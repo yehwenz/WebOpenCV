@@ -6,64 +6,66 @@
   <title>雙平台鏡片正反面 AOI 檢測系統</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background-color: #121212;
       color: #ffffff;
       text-align: center;
       margin: 0;
-      padding: 10px;
+      padding: 15px;
     }
     .container {
       position: relative;
       display: inline-block;
       width: 100%;
       max-width: 640px;
+      margin-top: 10px;
     }
-    /* iOS 修正：給予微小的透明度與實質寬高，防止 Safari 認定為不可見而停止解碼 */
+    /* iOS 必須讓 video 隱藏但不能 display:none */
     video {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: 100%;
-      opacity: 0.01;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
       pointer-events: none;
-      z-index: -1;
     }
     canvas {
       width: 100%;
       height: auto;
       background-color: #000;
-      border-radius: 8px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
     #status {
       margin: 10px 0;
-      padding: 8px;
+      padding: 10px;
       background-color: #222;
-      border-radius: 6px;
+      border-radius: 8px;
       font-size: 14px;
+      color: #aaa;
     }
     .btn {
       background-color: #007aff;
       color: white;
       border: none;
-      padding: 12px 20px;
+      padding: 12px 24px;
       font-size: 16px;
       font-weight: bold;
       border-radius: 8px;
       cursor: pointer;
       margin-bottom: 10px;
     }
+    .btn:disabled {
+      background-color: #444;
+      color: #888;
+    }
   </style>
-  <!-- 引入手機版除錯控制台 Eruda -->
-  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-  <script>eruda.init();</script>
-  <!-- 載入 OpenCV.js -->
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
 
-  <h2>鏡片正反面比對系統</h2>
+  <h2>鏡片正反面 AOI 比對系統</h2>
   <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
   <div id="status">等待 OpenCV.js 載入...</div>
 
@@ -84,48 +86,73 @@
 
     function onOpenCvReady() {
       isOpenCvReady = true;
-      status.innerText = '引擎已就緒，請開啟鏡頭';
-      startBtn.innerText = '開啟鏡頭';
+      status.innerText = '引擎已就緒，請點擊開啟鏡頭';
+      startBtn.innerText = '開啟鏡頭檢測';
       startBtn.disabled = false;
     }
 
     async function initCamera() {
       if (!isOpenCvReady) return;
       startBtn.disabled = true;
+      status.innerText = '正在請求相機權限...';
 
+      let stream = null;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
+        // 首選：強化的後鏡頭與解析度設定
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            facingMode: { exact: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
           audio: false
         });
-        video.srcObject = stream;
-        video.muted = true;
-        video.playsInline = true;
-        
-        await video.play();
-        video.addEventListener('loadedmetadata', onVideoReady);
       } catch (err) {
-        status.innerText = '無法存取相機: ' + err.message;
-        console.error(err);
-        startBtn.disabled = false;
+        console.warn('強烈後鏡頭請求失敗，改嘗試一般模式:', err);
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+          });
+        } catch (fallbackErr) {
+          status.innerText = '無法存取相機: ' + fallbackErr.message;
+          startBtn.disabled = false;
+          return;
+        }
       }
+
+      // 修正相機掛載與 iOS 播放邏輯
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+
+      try {
+        await video.play();
+        status.innerText = '相機啟動成功，初始化畫面上...';
+      } catch (playErr) {
+        console.error("Video 播放失敗:", playErr);
+      }
+
+      video.addEventListener('loadedmetadata', onVideoReady);
     }
 
     function onVideoReady() {
       if (streaming) return;
+
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         streaming = true;
-        status.innerText = '請將 [OK樣品] 放左邊，[待測品] 放右邊';
+        status.innerText = '請將 [OK樣品] 放左邊區域，[待測品] 放右邊區域';
         startBtn.style.display = 'none';
+        
         requestAnimationFrame(processVideo);
       } else {
         setTimeout(onVideoReady, 100);
       }
     }
 
-    // 計算指定 ROI 區域內斜線的角度 (加入全域安全保護)
+    // 計算 ROI 區域內中央長條的角度
     function detectAngle(srcMat, roiRect) {
       let roi = null, gray = null, edges = null, lines = null;
       try {
@@ -149,6 +176,7 @@
             let y2 = lines.data32S[i * 4 + 3];
 
             let angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+            // 過濾掉接近水平與垂直的邊框，只抓斜長條
             if (Math.abs(angle) > 15 && Math.abs(angle) < 165) {
               totalAngle += angle;
               lineCount++;
@@ -157,7 +185,6 @@
         }
         return lineCount > 0 ? totalAngle / lineCount : null;
       } catch (e) {
-        console.warn("ROI 角度計算異常:", e);
         return null;
       } finally {
         if (roi) roi.delete();
@@ -172,7 +199,7 @@
 
       let src = null;
       try {
-        // 先繪製原始影像
+        // 先繪製原始影像到 canvas
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -185,13 +212,15 @@
         let roiHeight = Math.floor(h * 0.6);
         let roiY = Math.floor((h - roiHeight) / 2);
 
+        // 左區 (OK 參考) 與 右區 (待測物)
         let leftRoiRect = new cv.Rect(Math.floor(w * 0.08), roiY, roiWidth, roiHeight);
         let rightRoiRect = new cv.Rect(Math.floor(w * 0.52), roiY, roiWidth, roiHeight);
 
+        // 分別計算兩區長條斜角
         let leftAngle = detectAngle(src, leftRoiRect);
         let rightAngle = detectAngle(src, rightRoiRect);
 
-        // 繪製左右邊框與提示
+        // 畫出對準框
         ctx.lineWidth = 3;
         ctx.strokeStyle = '#00FFFF';
         ctx.strokeRect(leftRoiRect.x, leftRoiRect.y, leftRoiRect.width, leftRoiRect.height);
@@ -202,9 +231,10 @@
         ctx.fillText('左: OK 參考物', leftRoiRect.x + 10, leftRoiRect.y + 25);
         ctx.fillText('右: 待測物', rightRoiRect.x + 10, rightRoiRect.y + 25);
 
-        // 判斷邏輯
+        // 判斷 OK/NG (斜角方向比對)
         if (leftAngle !== null && rightAngle !== null) {
           let angleDiff = Math.abs(leftAngle - rightAngle);
+          // 同向 (角度差小於 30 或接近 180) 判定 PASS，否則裝反判定 NG
           let isPass = angleDiff < 30 || angleDiff > 150;
 
           ctx.font = 'bold 44px sans-serif';
@@ -218,11 +248,11 @@
         } else {
           ctx.fillStyle = '#FFFF00';
           ctx.font = '18px sans-serif';
-          ctx.fillText('瞄準中...請將長條對準區域', w / 2 - 110, 50);
+          ctx.fillText('對焦中...請將鏡片置於兩側區域內', w / 2 - 140, 50);
         }
 
       } catch (err) {
-        console.error("迴圈執行錯誤:", err);
+        console.error("畫格運算錯誤:", err);
       } finally {
         if (src) src.delete();
       }
