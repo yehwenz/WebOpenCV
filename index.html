@@ -2,39 +2,63 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GitHub Pages Web AOI 檢測系統</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>iOS Safari Web AOI 檢測系統</title>
   <style>
     body {
-      font-family: sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: #121212;
       color: #ffffff;
       text-align: center;
       margin: 0;
-      padding: 10px;
+      padding: 15px;
     }
     .container {
       position: relative;
       display: inline-block;
-      max-width: 100%;
-    }
-    video, canvas {
       width: 100%;
       max-width: 640px;
-      height: auto;
-      border-radius: 8px;
+      margin-top: 10px;
     }
-    #canvasOutput {
+    /* iOS 必須讓 video 隱藏但不能 display:none 否則部分版本 Safari 會不渲染影格 */
+    video {
       position: absolute;
       top: 0;
       left: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      background-color: #000;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
     #status {
       margin: 10px 0;
-      padding: 8px;
-      background-color: #333;
-      border-radius: 4px;
+      padding: 10px;
+      background-color: #222;
+      border-radius: 8px;
       font-size: 14px;
+      color: #aaa;
+    }
+    .btn {
+      background-color: #007aff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .btn:disabled {
+      background-color: #444;
+      color: #888;
     }
   </style>
   <!-- 載入 OpenCV.js CDN -->
@@ -42,118 +66,159 @@
 </head>
 <body>
 
-  <h2>Web AOI 動態輪廓檢測</h2>
-  <div id="status">正在載入 OpenCV.js 引擎...</div>
+  <h2>iOS 鏡頭 AOI 輪廓檢測</h2>
+  <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
+  <div id="status">等待 OpenCV.js 載入...</div>
 
   <div class="container">
-    <video id="videoInput" playsinline style="display:none;"></video>
+    <!-- iOS 關鍵屬性：playsinline, autoplay, muted -->
+    <video id="videoInput" playsinline autoplay muted></video>
     <canvas id="canvasOutput"></canvas>
   </div>
 
   <script type="text/javascript">
-    let video = document.getElementById('videoInput');
-    let canvas = document.getElementById('canvasOutput');
-    let ctx = canvas.getContext('2d');
-    let status = document.getElementById('status');
+    const video = document.getElementById('videoInput');
+    const canvas = document.getElementById('canvasOutput');
+    const ctx = canvas.getContext('2d');
+    const status = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
+    
     let streaming = false;
+    let isOpenCvReady = false;
 
-    // 當 OpenCV.js 載入完成時觸發
+    // 1. 當 OpenCV.js 引擎載入完成
     function onOpenCvReady() {
-      status.innerText = 'OpenCV.js 已就緒，正在請求鏡頭權限...';
-      startCamera();
+      isOpenCvReady = true;
+      status.innerText = '引擎已就緒，請點擊上方按鈕開啟鏡頭';
+      startBtn.innerText = '開啟鏡頭檢測';
+      startBtn.disabled = false;
     }
 
-    // 開啟手機/平板後鏡頭
-    function startCamera() {
-      navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false
-      })
-      .then(function(stream) {
+    // 2. 由使用者點擊事件觸發相機（繞過 iOS 權限與自動播放限制）
+    async function initCamera() {
+      if (!isOpenCvReady) return;
+      startBtn.disabled = true;
+      status.innerText = '正在請求相機權限...';
+
+      try {
+        // 指定後鏡頭 (environment)
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            facingMode: { exact: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        
         video.srcObject = stream;
-        video.play();
-      })
-      .catch(function(err) {
-        status.innerText = '開啟鏡頭失敗：' + err.name + " - " + err.message;
-      });
-
-      video.addEventListener('canplay', function() {
-        if (!streaming) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          streaming = true;
-          status.innerText = '檢測運作中（動態輪廓追蹤）';
-          // 開始影像處理迴圈
-          requestAnimationFrame(processVideo);
+        // 強制呼叫 play() 並捕獲 iOS 可能的異常
+        await video.play();
+        status.innerText = '相機已啟動，等待畫面解析度...';
+      } catch (err) {
+        console.warn('後鏡頭請求失敗，嘗試一般後鏡頭設定:', err);
+        try {
+          // 退回軟性後鏡頭請求
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+          });
+          video.srcObject = fallbackStream;
+          await video.play();
+        } catch (fallbackErr) {
+          status.innerText = '無法存取相機: ' + fallbackErr.message;
+          startBtn.disabled = false;
+          return;
         }
-      }, false);
+      }
+
+      // 監聽影片載入元資料，確保非 0x0 解析度後才初始化 Canvas
+      video.addEventListener('loadedmetadata', onVideoReady);
     }
 
-    // 核心影像處理與動態輪廓辨識迴圈
+    function onVideoReady() {
+      if (streaming) return;
+
+      // 檢查 iOS Safari 是否真的取得有效寬高
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        streaming = true;
+        status.innerText = `檢測運作中 (${canvas.width}x${canvas.height})`;
+        startBtn.style.display = 'none';
+        
+        // 開始繪圖與 OpenCV 運算迴圈
+        requestAnimationFrame(processVideo);
+      } else {
+        // 若寬高仍為 0，等待 100ms 後重試
+        setTimeout(onVideoReady, 100);
+      }
+    }
+
+    // 3. 核心檢測與渲染迴圈
     function processVideo() {
       if (!streaming) return;
 
-      // 建立 OpenCV 矩陣
+      // 建立 WebAssembly 記憶體矩陣
       let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
       let gray = new cv.Mat();
       let thresholdMat = new cv.Mat();
       let contours = new cv.MatVector();
       let hierarchy = new cv.Mat();
 
-      // 從 video 抓取目前影格
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      src.data.set(imageData.data);
+      try {
+        // 從 video 擷取影像繪至 Canvas 並讀取資料
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        src.data.set(imageData.data);
 
-      // 1. 灰階化
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-      
-      // 2. 二值化 (閾值處理，可依現場光源微調 100 數值)
-      cv.threshold(gray, thresholdMat, 100, 255, cv.THRESH_BINARY_INV);
+        // 影像處理步驟：灰階 $\rightarrow$ OTSU 自動二值化 $\rightarrow$ 尋找輪廓
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+        cv.threshold(gray, thresholdMat, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        cv.findContours(thresholdMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-      // 3. 尋找輪廓
-      cv.findContours(thresholdMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        // 渲染基礎畫面
+        cv.imshow('canvasOutput', src);
 
-      let maxArea = 0;
-      let maxContourIdx = -1;
+        // 尋找最大外接輪廓 (Target ROI)
+        let maxArea = 0;
+        let maxContourIdx = -1;
 
-      // 找出畫面中最顯著的最大輪廓（假設為待測物）
-      for (let i = 0; i < contours.size(); ++i) {
-        let cnt = contours.get(i);
-        let area = cv.contourArea(cnt);
-        if (area > maxArea && area > 1000) { // 過濾過小的雜訊
-          maxArea = area;
-          maxContourIdx = i;
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i);
+          let area = cv.contourArea(cnt);
+          if (area > maxArea && area > 1000) { // 過濾極小雜訊
+            maxArea = area;
+            maxContourIdx = i;
+          }
         }
+
+        // 在 Canvas 上繪製動態綠色檢測框
+        if (maxContourIdx !== -1) {
+          let bestContour = contours.get(maxContourIdx);
+          let rect = cv.boundingRect(bestContour);
+
+          ctx.strokeStyle = '#00FF00';
+          ctx.lineWidth = 4;
+          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+          ctx.fillStyle = '#00FF00';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.fillText(`Target: ${rect.width}x${rect.height}`, rect.x, rect.y > 25 ? rect.y - 8 : 25);
+        }
+
+      } catch (err) {
+        console.error("OpenCV 處理錯誤:", err);
+      } finally {
+        // 4. 重要：極致嚴謹的手動記憶體釋放，避免 iOS 瀏覽器崩潰
+        src.delete();
+        gray.delete();
+        thresholdMat.delete();
+        contours.delete();
+        hierarchy.delete();
       }
 
-      // 在原圖畫面上繪製影格
-      cv.imshow('canvasOutput', src);
-
-      // 4. 動態外接矩形 (Dynamic Bounding Box / Auto ROI)
-      if (maxContourIdx !== -1) {
-        let bestContour = contours.get(maxContourIdx);
-        let rect = cv.boundingRect(bestContour);
-
-        // 使用 Canvas API 劃出綠色動態檢測框
-        ctx.strokeStyle = '#00FF00';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-
-        // 標記文字資訊
-        ctx.fillStyle = '#00FF00';
-        ctx.font = '16px sans-serif';
-        ctx.fillText(`Target ROI: ${rect.width}x${rect.height}`, rect.x, rect.y > 20 ? rect.y - 8 : 20);
-      }
-
-      // 5. 重要：釋放 WebAssembly 記憶體避免瀏覽器崩潰
-      src.delete();
-      gray.delete();
-      thresholdMat.delete();
-      contours.delete();
-      hierarchy.delete();
-
-      // 請求下一影格
+      // 持續請求下一影格
       requestAnimationFrame(processVideo);
     }
   </script>
