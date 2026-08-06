@@ -3,75 +3,64 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>iOS Safari Web AOI 檢測系統</title>
+  <title>雙平台鏡片正反面 AOI 檢測系統</title>
   <style>
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
       background-color: #121212;
       color: #ffffff;
       text-align: center;
       margin: 0;
-      padding: 15px;
+      padding: 10px;
     }
     .container {
       position: relative;
       display: inline-block;
       width: 100%;
       max-width: 640px;
-      margin-top: 10px;
     }
-    /* iOS 必須讓 video 隱藏但不能 display:none 否則部分版本 Safari 會不渲染影格 */
     video {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.01;
       pointer-events: none;
+      z-index: -1;
     }
     canvas {
       width: 100%;
       height: auto;
       background-color: #000;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      border-radius: 8px;
     }
     #status {
       margin: 10px 0;
-      padding: 10px;
+      padding: 8px;
       background-color: #222;
-      border-radius: 8px;
-      font-size: 14px;
-      color: #aaa;
+      border-radius: 6px;
+      font-size: 15px;
     }
     .btn {
       background-color: #007aff;
       color: white;
       border: none;
-      padding: 12px 24px;
+      padding: 12px 20px;
       font-size: 16px;
       font-weight: bold;
       border-radius: 8px;
       cursor: pointer;
       margin-bottom: 10px;
     }
-    .btn:disabled {
-      background-color: #444;
-      color: #888;
-    }
   </style>
-  <!-- 載入 OpenCV.js CDN -->
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
 
-  <h2>iOS 鏡頭 AOI 輪廓檢測</h2>
+  <h2>鏡片正反面比對系統</h2>
   <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
   <div id="status">等待 OpenCV.js 載入...</div>
 
   <div class="container">
-    <!-- iOS 關鍵屬性：playsinline, autoplay, muted -->
     <video id="videoInput" playsinline autoplay muted></video>
     <canvas id="canvasOutput"></canvas>
   </div>
@@ -86,151 +75,149 @@
     let streaming = false;
     let isOpenCvReady = false;
 
-    // 1. 當 OpenCV.js 引擎載入完成
     function onOpenCvReady() {
       isOpenCvReady = true;
-      status.innerText = '引擎已就緒，請點擊上方按鈕開啟鏡頭';
-      startBtn.innerText = '開啟鏡頭檢測';
+      status.innerText = '引擎已就緒，請開啟鏡頭';
+      startBtn.innerText = '開啟鏡頭';
       startBtn.disabled = false;
     }
 
-    // 2. 由使用者點擊事件觸發相機（繞過 iOS 權限與自動播放限制）
     async function initCamera() {
       if (!isOpenCvReady) return;
       startBtn.disabled = true;
-      status.innerText = '正在請求相機權限...';
 
       try {
-        // 指定後鏡頭 (environment)
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: { exact: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
+          video: { facingMode: "environment" },
           audio: false
         });
-        
         video.srcObject = stream;
-
-        // 關鍵：強迫靜音並播放
         video.muted = true;
-        video.playsInline = true;
-
-        // 明確呼叫 play()
-        let playPromise = video.play();
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log("iOS Video 播放成功");
-          }).catch(error => {
-            console.error("iOS Video 播放失敗:", error);
-            // 若被檔，嘗試在使用者再次點擊時播放
-          });
-        }
+        await video.play();
+        video.addEventListener('loadedmetadata', onVideoReady);
       } catch (err) {
-        console.warn('後鏡頭請求失敗，嘗試一般後鏡頭設定:', err);
-        try {
-          // 退回軟性後鏡頭請求
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: "environment" },
-            audio: false
-          });
-          video.srcObject = fallbackStream;
-          await video.play();
-        } catch (fallbackErr) {
-          status.innerText = '無法存取相機: ' + fallbackErr.message;
-          startBtn.disabled = false;
-          return;
-        }
+        status.innerText = '無法存取相機: ' + err.message;
+        startBtn.disabled = false;
       }
-
-      // 監聽影片載入元資料，確保非 0x0 解析度後才初始化 Canvas
-      video.addEventListener('loadedmetadata', onVideoReady);
     }
 
     function onVideoReady() {
       if (streaming) return;
-
-      // 檢查 iOS Safari 是否真的取得有效寬高
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         streaming = true;
-        status.innerText = `檢測運作中 (${canvas.width}x${canvas.height})`;
+        status.innerText = '請將 [OK樣品] 放左邊，[待測品] 放右邊';
         startBtn.style.display = 'none';
-        
-        // 開始繪圖與 OpenCV 運算迴圈
         requestAnimationFrame(processVideo);
       } else {
-        // 若寬高仍為 0，等待 100ms 後重試
         setTimeout(onVideoReady, 100);
       }
     }
 
-    // 3. 核心檢測與渲染迴圈
+    // 計算指定 ROI 區域內斜線的角度
+    function detectAngle(srcMat, roiRect) {
+      let roi = srcMat.roi(roiRect);
+      let gray = new cv.Mat();
+      let edges = new cv.Mat();
+      let lines = new cv.Mat();
+
+      cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
+      cv.Canny(gray, edges, 50, 150, 3, false);
+      
+      // 霍夫線變換：尋找長條特徵線
+      cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, 30, 10);
+
+      let totalAngle = 0;
+      let lineCount = 0;
+
+      for (let i = 0; i < lines.rows; ++i) {
+        let x1 = lines.data32S[i * 4];
+        let y1 = lines.data32S[i * 4 + 1];
+        let x2 = lines.data32S[i * 4 + 2];
+        let y2 = lines.data32S[i * 4 + 3];
+
+        let angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+        
+        // 篩選非水平/非垂直的斜線角度
+        if (Math.abs(angle) > 20 && Math.abs(angle) < 160) {
+          totalAngle += angle;
+          lineCount++;
+        }
+      }
+
+      let avgAngle = lineCount > 0 ? totalAngle / lineCount : null;
+
+      roi.delete(); gray.delete(); edges.delete(); lines.delete();
+      return avgAngle;
+    }
+
     function processVideo() {
       if (!streaming) return;
 
-      // 建立 WebAssembly 記憶體矩陣
       let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-      let gray = new cv.Mat();
-      let thresholdMat = new cv.Mat();
-      let contours = new cv.MatVector();
-      let hierarchy = new cv.Mat();
 
       try {
-        // 從 video 擷取影像繪至 Canvas 並讀取資料
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         src.data.set(imageData.data);
 
-        // 影像處理步驟：灰階 $\rightarrow$ OTSU 自動二值化 $\rightarrow$ 尋找輪廓
-        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
-        cv.threshold(gray, thresholdMat, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-        cv.findContours(thresholdMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        // 劃分左右兩個檢測區域 (ROI)
+        let w = canvas.width;
+        let h = canvas.height;
+        let roiWidth = Math.floor(w * 0.4);
+        let roiHeight = Math.floor(h * 0.6);
+        let roiY = Math.floor((h - roiHeight) / 2);
 
-        // 渲染基礎畫面
+        let leftRoiRect = new cv.Rect(Math.floor(w * 0.08), roiY, roiWidth, roiHeight);  // 左邊: 參考物 (OK)
+        let rightRoiRect = new cv.Rect(Math.floor(w * 0.52), roiY, roiWidth, roiHeight); // 右邊: 待測物
+
+        // 分別計算兩邊的角度
+        let leftAngle = detectAngle(src, leftRoiRect);
+        let rightAngle = detectAngle(src, rightRoiRect);
+
+        // 先渲染相機原圖
         cv.imshow('canvasOutput', src);
 
-        // 尋找最大外接輪廓 (Target ROI)
-        let maxArea = 0;
-        let maxContourIdx = -1;
+        // 畫出左右 ROI 檢測框
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#00FFFF'; // 藍綠色框
+        ctx.strokeRect(leftRoiRect.x, leftRoiRect.y, leftRoiRect.width, leftRoiRect.height);
+        ctx.strokeRect(rightRoiRect.x, rightRoiRect.y, rightRoiRect.width, rightRoiRect.height);
 
-        for (let i = 0; i < contours.size(); ++i) {
-          let cnt = contours.get(i);
-          let area = cv.contourArea(cnt);
-          if (area > maxArea && area > 1000) { // 過濾極小雜訊
-            maxArea = area;
-            maxContourIdx = i;
+        ctx.fillStyle = '#00FFFF';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('左: OK 參考物', leftRoiRect.x + 10, leftRoiRect.y + 25);
+        ctx.fillText('右: 待測物', rightRoiRect.x + 10, rightRoiRect.y + 25);
+
+        // 比對判定
+        if (leftAngle !== null && rightAngle !== null) {
+          // 計算角度差
+          let angleDiff = Math.abs(leftAngle - rightAngle);
+          
+          // 若角度方向一致 (角度差小於 30 度) 為 PASS，否則為 FAIL
+          let isPass = angleDiff < 30 || angleDiff > 150; 
+
+          ctx.font = 'bold 48px sans-serif';
+          if (isPass) {
+            ctx.fillStyle = '#00FF00';
+            ctx.fillText('PASS (正常)', w / 2 - 120, 80);
+          } else {
+            ctx.fillStyle = '#FF0000';
+            ctx.fillText('NG (裝反)', w / 2 - 100, 80);
           }
-        }
-
-        // 在 Canvas 上繪製動態綠色檢測框
-        if (maxContourIdx !== -1) {
-          let bestContour = contours.get(maxContourIdx);
-          let rect = cv.boundingRect(bestContour);
-
-          ctx.strokeStyle = '#00FF00';
-          ctx.lineWidth = 4;
-          ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-
-          ctx.fillStyle = '#00FF00';
-          ctx.font = 'bold 18px sans-serif';
-          ctx.fillText(`Target: ${rect.width}x${rect.height}`, rect.x, rect.y > 25 ? rect.y - 8 : 25);
+        } else {
+          ctx.fillStyle = '#FFFF00';
+          ctx.font = '20px sans-serif';
+          ctx.fillText('對焦中...請將鏡片置於框內', w / 2 - 120, 50);
         }
 
       } catch (err) {
-        console.error("OpenCV 處理錯誤:", err);
+        console.error(err);
       } finally {
-        // 4. 重要：極致嚴謹的手動記憶體釋放，避免 iOS 瀏覽器崩潰
         src.delete();
-        gray.delete();
-        thresholdMat.delete();
-        contours.delete();
-        hierarchy.delete();
       }
 
-      // 持續請求下一影格
       requestAnimationFrame(processVideo);
     }
   </script>
