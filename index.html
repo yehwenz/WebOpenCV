@@ -130,8 +130,12 @@
       video.playsInline = true;
 
       try {
-        await video.play();
-        status.innerText = '相機啟動成功，初始化畫面上...';
+        video.play().then(() => {
+          status.innerText = '相機已播放，等待畫面解析度...';
+        }).catch(err => {
+          status.innerText = 'Video 播放被擋: ' + err.message;
+          // 如果卡在這裡，代表需要作業員再次手動點擊螢幕來 play()
+        });
       } catch (playErr) {
         console.error("Video 播放失敗:", playErr);
       }
