@@ -19,8 +19,11 @@
       width: 100%;
       max-width: 640px;
     }
+    /* iOS 修正：給予微小的透明度與實質寬高，防止 Safari 認定為不可見而停止解碼 */
     video {
       position: absolute;
+      top: 0;
+      left: 0;
       width: 100%;
       height: 100%;
       opacity: 0.01;
@@ -38,7 +41,7 @@
       padding: 8px;
       background-color: #222;
       border-radius: 6px;
-      font-size: 15px;
+      font-size: 14px;
     }
     .btn {
       background-color: #007aff;
@@ -52,6 +55,10 @@
       margin-bottom: 10px;
     }
   </style>
+  <!-- 引入手機版除錯控制台 Eruda -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+  <script>eruda.init();</script>
+  <!-- 載入 OpenCV.js -->
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
@@ -92,23 +99,14 @@
           audio: false
         });
         video.srcObject = stream;
-
-        // 關鍵：強迫靜音並播放
         video.muted = true;
         video.playsInline = true;
-
-        // 明確呼叫 play()
-        let playPromise = video.play();
-        if (playPromise !== undefined) {
-          playPromise.then(() => {
-            console.log("iOS Video 播放成功");
-          }).catch(error => {
-            console.error("iOS Video 播放失敗:", error);
-            // 若被檔，嘗試在使用者再次點擊時播放
-          });
-        }
+        
+        await video.play();
+        video.addEventListener('loadedmetadata', onVideoReady);
       } catch (err) {
         status.innerText = '無法存取相機: ' + err.message;
+        console.error(err);
         startBtn.disabled = false;
       }
     }
@@ -127,73 +125,75 @@
       }
     }
 
-    // 計算指定 ROI 區域內斜線的角度
+    // 計算指定 ROI 區域內斜線的角度 (加入全域安全保護)
     function detectAngle(srcMat, roiRect) {
-      let roi = srcMat.roi(roiRect);
-      let gray = new cv.Mat();
-      let edges = new cv.Mat();
-      let lines = new cv.Mat();
+      let roi = null, gray = null, edges = null, lines = null;
+      try {
+        roi = srcMat.roi(roiRect);
+        gray = new cv.Mat();
+        edges = new cv.Mat();
+        lines = new cv.Mat();
 
-      cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
-      cv.Canny(gray, edges, 50, 150, 3, false);
-      
-      // 霍夫線變換：尋找長條特徵線
-      cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, 30, 10);
+        cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
+        cv.Canny(gray, edges, 50, 150, 3, false);
+        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, 30, 10);
 
-      let totalAngle = 0;
-      let lineCount = 0;
+        let totalAngle = 0;
+        let lineCount = 0;
 
-      for (let i = 0; i < lines.rows; ++i) {
-        let x1 = lines.data32S[i * 4];
-        let y1 = lines.data32S[i * 4 + 1];
-        let x2 = lines.data32S[i * 4 + 2];
-        let y2 = lines.data32S[i * 4 + 3];
+        if (lines && lines.rows > 0) {
+          for (let i = 0; i < lines.rows; ++i) {
+            let x1 = lines.data32S[i * 4];
+            let y1 = lines.data32S[i * 4 + 1];
+            let x2 = lines.data32S[i * 4 + 2];
+            let y2 = lines.data32S[i * 4 + 3];
 
-        let angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
-        
-        // 篩選非水平/非垂直的斜線角度
-        if (Math.abs(angle) > 20 && Math.abs(angle) < 160) {
-          totalAngle += angle;
-          lineCount++;
+            let angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
+            if (Math.abs(angle) > 15 && Math.abs(angle) < 165) {
+              totalAngle += angle;
+              lineCount++;
+            }
+          }
         }
+        return lineCount > 0 ? totalAngle / lineCount : null;
+      } catch (e) {
+        console.warn("ROI 角度計算異常:", e);
+        return null;
+      } finally {
+        if (roi) roi.delete();
+        if (gray) gray.delete();
+        if (edges) edges.delete();
+        if (lines) lines.delete();
       }
-
-      let avgAngle = lineCount > 0 ? totalAngle / lineCount : null;
-
-      roi.delete(); gray.delete(); edges.delete(); lines.delete();
-      return avgAngle;
     }
 
     function processVideo() {
       if (!streaming) return;
 
-      let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
-
+      let src = null;
       try {
+        // 先繪製原始影像
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
         src.data.set(imageData.data);
 
-        // 劃分左右兩個檢測區域 (ROI)
         let w = canvas.width;
         let h = canvas.height;
         let roiWidth = Math.floor(w * 0.4);
         let roiHeight = Math.floor(h * 0.6);
         let roiY = Math.floor((h - roiHeight) / 2);
 
-        let leftRoiRect = new cv.Rect(Math.floor(w * 0.08), roiY, roiWidth, roiHeight);  // 左邊: 參考物 (OK)
-        let rightRoiRect = new cv.Rect(Math.floor(w * 0.52), roiY, roiWidth, roiHeight); // 右邊: 待測物
+        let leftRoiRect = new cv.Rect(Math.floor(w * 0.08), roiY, roiWidth, roiHeight);
+        let rightRoiRect = new cv.Rect(Math.floor(w * 0.52), roiY, roiWidth, roiHeight);
 
-        // 分別計算兩邊的角度
         let leftAngle = detectAngle(src, leftRoiRect);
         let rightAngle = detectAngle(src, rightRoiRect);
 
-        // 先渲染相機原圖
-        cv.imshow('canvasOutput', src);
-
-        // 畫出左右 ROI 檢測框
+        // 繪製左右邊框與提示
         ctx.lineWidth = 3;
-        ctx.strokeStyle = '#00FFFF'; // 藍綠色框
+        ctx.strokeStyle = '#00FFFF';
         ctx.strokeRect(leftRoiRect.x, leftRoiRect.y, leftRoiRect.width, leftRoiRect.height);
         ctx.strokeRect(rightRoiRect.x, rightRoiRect.y, rightRoiRect.width, rightRoiRect.height);
 
@@ -202,32 +202,29 @@
         ctx.fillText('左: OK 參考物', leftRoiRect.x + 10, leftRoiRect.y + 25);
         ctx.fillText('右: 待測物', rightRoiRect.x + 10, rightRoiRect.y + 25);
 
-        // 比對判定
+        // 判斷邏輯
         if (leftAngle !== null && rightAngle !== null) {
-          // 計算角度差
           let angleDiff = Math.abs(leftAngle - rightAngle);
-          
-          // 若角度方向一致 (角度差小於 30 度) 為 PASS，否則為 FAIL
-          let isPass = angleDiff < 30 || angleDiff > 150; 
+          let isPass = angleDiff < 30 || angleDiff > 150;
 
-          ctx.font = 'bold 48px sans-serif';
+          ctx.font = 'bold 44px sans-serif';
           if (isPass) {
             ctx.fillStyle = '#00FF00';
-            ctx.fillText('PASS (正常)', w / 2 - 120, 80);
+            ctx.fillText('PASS (正常)', w / 2 - 110, 70);
           } else {
             ctx.fillStyle = '#FF0000';
-            ctx.fillText('NG (裝反)', w / 2 - 100, 80);
+            ctx.fillText('NG (裝反)', w / 2 - 90, 70);
           }
         } else {
           ctx.fillStyle = '#FFFF00';
-          ctx.font = '20px sans-serif';
-          ctx.fillText('對焦中...請將鏡片置於框內', w / 2 - 120, 50);
+          ctx.font = '18px sans-serif';
+          ctx.fillText('瞄準中...請將長條對準區域', w / 2 - 110, 50);
         }
 
       } catch (err) {
-        console.error(err);
+        console.error("迴圈執行錯誤:", err);
       } finally {
-        src.delete();
+        if (src) src.delete();
       }
 
       requestAnimationFrame(processVideo);
