@@ -112,9 +112,21 @@
         });
         
         video.srcObject = stream;
-        // 強制呼叫 play() 並捕獲 iOS 可能的異常
-        await video.play();
-        status.innerText = '相機已啟動，等待畫面解析度...';
+
+        // 關鍵：強迫靜音並播放
+        video.muted = true;
+        video.playsInline = true;
+
+        // 明確呼叫 play()
+        let playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log("iOS Video 播放成功");
+          }).catch(error => {
+            console.error("iOS Video 播放失敗:", error);
+            // 若被檔，嘗試在使用者再次點擊時播放
+          });
+        }
       } catch (err) {
         console.warn('後鏡頭請求失敗，嘗試一般後鏡頭設定:', err);
         try {
