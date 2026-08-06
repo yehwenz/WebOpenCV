@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub Pages Web AOI 檢測系統</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      text-align: center;
+      margin: 0;
+      padding: 10px;
+    }
+    .container {
+      position: relative;
+      display: inline-block;
+      max-width: 100%;
+    }
+    video, canvas {
+      width: 100%;
+      max-width: 640px;
+      height: auto;
+      border-radius: 8px;
+    }
+    #canvasOutput {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #status {
+      margin: 10px 0;
+      padding: 8px;
+      background-color: #333;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+  </style>
+  <!-- 載入 OpenCV.js CDN -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+</head>
+<body>
+
+  <h2>Web AOI 動態輪廓檢測</h2>
+  <div id="status">正在載入 OpenCV.js 引擎...</div>
+
+  <div class="container">
+    <video id="videoInput" playsinline style="display:none;"></video>
+    <canvas id="canvasOutput"></canvas>
+  </div>
+
+  <script type="text/javascript">
+    let video = document.getElementById('videoInput');
+    let canvas = document.getElementById('canvasOutput');
+    let ctx = canvas.getContext('2d');
+    let status = document.getElementById('status');
+    let streaming = false;
+
+    // 當 OpenCV.js 載入完成時觸發
+    function onOpenCvReady() {
+      status.innerText = 'OpenCV.js 已就緒，正在請求鏡頭權限...';
+      startCamera();
+    }
+
+    // 開啟手機/平板後鏡頭
+    function startCamera() {
+      navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false
+      })
+      .then(function(stream) {
+        video.srcObject = stream;
+        video.play();
+      })
+      .catch(function(err) {
+        status.innerText = '開啟鏡頭失敗：' + err.name + " - " + err.message;
+      });
+
+      video.addEventListener('canplay', function() {
+        if (!streaming) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          streaming = true;
+          status.innerText = '檢測運作中（動態輪廓追蹤）';
+          // 開始影像處理迴圈
+          requestAnimationFrame(processVideo);
+        }
+      }, false);
+    }
+
+    // 核心影像處理與動態輪廓辨識迴圈
+    function processVideo() {
+      if (!streaming) return;
+
+      // 建立 OpenCV 矩陣
+      let src = new cv.Mat(video.videoHeight, video.videoWidth, cv.CV_8UC4);
+      let gray = new cv.Mat();
+      let thresholdMat = new cv.Mat();
+      let contours = new cv.MatVector();
+      let hierarchy = new cv.Mat();
+
+      // 從 video 抓取目前影格
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      src.data.set(imageData.data);
+
+      // 1. 灰階化
+      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+      
+      // 2. 二值化 (閾值處理，可依現場光源微調 100 數值)
+      cv.threshold(gray, thresholdMat, 100, 255, cv.THRESH_BINARY_INV);
+
+      // 3. 尋找輪廓
+      cv.findContours(thresholdMat, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+      let maxArea = 0;
+      let maxContourIdx = -1;
+
+      // 找出畫面中最顯著的最大輪廓（假設為待測物）
+      for (let i = 0; i < contours.size(); ++i) {
+        let cnt = contours.get(i);
+        let area = cv.contourArea(cnt);
+        if (area > maxArea && area > 1000) { // 過濾過小的雜訊
+          maxArea = area;
+          maxContourIdx = i;
+        }
+      }
+
+      // 在原圖畫面上繪製影格
+      cv.imshow('canvasOutput', src);
+
+      // 4. 動態外接矩形 (Dynamic Bounding Box / Auto ROI)
+      if (maxContourIdx !== -1) {
+        let bestContour = contours.get(maxContourIdx);
+        let rect = cv.boundingRect(bestContour);
+
+        // 使用 Canvas API 劃出綠色動態檢測框
+        ctx.strokeStyle = '#00FF00';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+
+        // 標記文字資訊
+        ctx.fillStyle = '#00FF00';
+        ctx.font = '16px sans-serif';
+        ctx.fillText(`Target ROI: ${rect.width}x${rect.height}`, rect.x, rect.y > 20 ? rect.y - 8 : 20);
+      }
+
+      // 5. 重要：釋放 WebAssembly 記憶體避免瀏覽器崩潰
+      src.delete();
+      gray.delete();
+      thresholdMat.delete();
+      contours.delete();
+      hierarchy.delete();
+
+      // 請求下一影格
+      requestAnimationFrame(processVideo);
+    }
+  </script>
+</body>
+</html>
