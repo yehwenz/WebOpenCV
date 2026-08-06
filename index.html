@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>車燈鏡片特徵 AOI 檢測系統 (穩定版)</title>
+  <title>車燈鏡片斜槽特徵 AOI 檢測</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -48,11 +48,11 @@
 </head>
 <body>
 
-  <h2>車燈鏡片特徵精準 AOI 檢測</h2>
+  <h2>車燈鏡片斜槽特徵 AOI 檢測</h2>
   
   <div class="mode-select">
-    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 邊 (斜線 /)</button>
-    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">目前產線：R 邊 (斜線 \)</button>
+    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 边 (預期斜線 /)</button>
+    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">目前產線：R 邊 (預期斜線 \)</button>
   </div>
 
   <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
@@ -107,8 +107,6 @@
         video.muted = true;
         video.setAttribute("playsinline", "true");
         video.setAttribute("webkit-playsinline", "true");
-        
-        // 絕對不使用 await play()，改用簡單呼叫並讓 video 自行啟動
         video.play().catch(e => console.log("背景播放提示:", e));
 
         checkVideoReady();
@@ -119,17 +117,15 @@
     }
 
     function checkVideoReady() {
-      // 只要 video 準備就緒且寬高大於 0，就代表可以開始抓畫面
       if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         streaming = true;
-        status.innerText = '檢測運行中：請將產品與耳座對準框內';
+        status.innerText = '檢測運行中：請將鏡片與斜槽放入對準框內';
         startBtn.style.display = 'none';
         
         requestAnimationFrame(processFrame);
       } else {
-        // 持續輪詢直到 Safari 影音串流完全展開
         setTimeout(checkVideoReady, 100);
       }
     }
@@ -143,80 +139,72 @@
       let w = canvas.width;
       let h = canvas.height;
 
-      // 2. 設定整體產品對準框 (對齊轉 90 度後的鏡片本體)
-      let productW = Math.floor(w * 0.50);
-      let productH = Math.floor(productW * 0.70);
-      let productX = Math.floor((w - productW) / 2);
-      let productY = Math.floor((h - productH) / 2) + 20;
+      // 2. 畫出「鏡片範圍框」（綠色矩形）
+      let lensW = Math.floor(w * 0.50);
+      let lensH = Math.floor(lensW * 0.70);
+      let lensX = Math.floor((w - lensW) / 2);
+      let lensY = Math.floor((h - lensH) / 2);
 
-      // 畫出產品主外框（綠色）
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.strokeStyle = '#00FF00';
-      ctx.strokeRect(productX, productY, productW, productH);
-
-      // 畫出頂部耳座指示 (頂部突起)
-      let earW = Math.floor(productW * 0.25);
-      let earH = Math.floor(productH * 0.35);
-      let earX = productX + Math.floor(productW * 0.15);
-      let earY = productY - earH;
-      ctx.strokeStyle = '#00FF00';
-      ctx.strokeRect(earX, earY, earW, earH);
+      ctx.strokeRect(lensX, lensY, lensW, lensH);
 
       ctx.fillStyle = '#00FF00';
-      ctx.font = '14px sans-serif';
-      ctx.fillText('耳座對點', earX, earY - 5);
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText('鏡片範圍', lensX, lensY - 8);
 
-      // 3. 設定特徵專用 ROI 框（核心：只取中間斜線區域）
-      let subRoiW = Math.floor(productW * 0.65);
-      let subRoiH = Math.floor(productH * 0.55);
-      let subRoiX = productX + Math.floor((productW - subRoiW) / 2);
-      let subRoiY = productY + Math.floor((productH - subRoiH) / 2);
+      // 3. 畫出「斜槽檢測區域」（黃色虛線框）
+      let slotW = Math.floor(lensW * 0.60);
+      let slotH = Math.floor(lensH * 0.50);
+      let slotX = lensX + Math.floor((lensW - slotW) / 2);
+      let slotY = lensY + Math.floor((lensH - slotH) / 2);
 
-      // 畫出斜特徵檢測精準框（黃色虛線框）
       ctx.save();
       ctx.lineWidth = 2;
       ctx.strokeStyle = '#FFCC00';
       ctx.setLineDash([6, 6]);
-      ctx.strokeRect(subRoiX, subRoiY, subRoiW, subRoiH);
+      ctx.strokeRect(slotX, slotY, slotW, slotH);
 
-      // 畫出預期的斜特徵方向參考線
+      // 畫出預期斜槽線段
       ctx.lineWidth = 3;
       ctx.beginPath();
       if (currentMode === 'L') {
-        // L 邊：左下至右上 (/)
-        ctx.moveTo(subRoiX + subRoiW * 0.2, subRoiY + subRoiH * 0.8);
-        ctx.lineTo(subRoiX + subRoiW * 0.8, subRoiY + subRoiH * 0.2);
+        // L 邊 (轉90度後)：左下至右上 (/)
+        ctx.moveTo(slotX + slotW * 0.2, slotY + slotH * 0.8);
+        ctx.lineTo(slotX + slotW * 0.8, slotY + slotH * 0.2);
       } else {
-        // R 邊：左上至右下 (\)
-        ctx.moveTo(subRoiX + subRoiW * 0.2, subRoiY + subRoiH * 0.2);
-        ctx.lineTo(subRoiX + subRoiW * 0.8, subRoiY + subRoiH * 0.8);
+        // R 邊 (轉90度後)：左上至右下 (\)
+        ctx.moveTo(slotX + slotW * 0.2, slotY + slotH * 0.2);
+        ctx.lineTo(slotX + slotW * 0.8, slotY + slotH * 0.8);
       }
       ctx.stroke();
       ctx.restore();
 
       ctx.fillStyle = '#FFCC00';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillText(`[${currentMode} 邊] 斜特徵區域`, subRoiX, subRoiY - 8);
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`[${currentMode} 邊] 斜槽區域`, slotX, slotY - 6);
 
-      // 4. OpenCV 視覺分析（只限縮在 subRoi 內計算）
+      // 4. OpenCV 演算法：檢測斜槽方向
       try {
         let src = cv.imread(canvas);
         let gray = new cv.Mat();
         let edges = new cv.Mat();
         let lines = new cv.Mat();
 
-        let rectROI = new cv.Rect(subRoiX, subRoiY, subRoiW, subRoiH);
+        let rectROI = new cv.Rect(slotX, slotY, slotW, slotH);
         let roi = src.roi(rectROI);
 
         cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
         
+        // 模糊平滑背景
         let ksize = new cv.Size(5, 5);
         cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
 
-        cv.Canny(gray, edges, 60, 150, 3, false);
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 35, 45, 10);
+        // 邊緣提取與直線檢測
+        cv.Canny(gray, edges, 50, 150, 3, false);
+        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 30, 40, 10);
 
-        let detectedSlope = 0;
+        let detectedSlopeSum = 0;
         let validLineCount = 0;
 
         for (let i = 0; i < lines.rows; ++i) {
@@ -229,41 +217,47 @@
           let dy = y2 - y1;
 
           if (dx !== 0) {
+            // 影像座標系：Y軸向下，因此 dy/dx < 0 實質代表左下至右上 (/)
             let slope = dy / dx;
             let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
 
-            if (angle >= 25 && angle <= 65) {
-              detectedSlope += slope;
+            // 過濾掉接近水平與垂直的邊緣，只取斜角 (20° ~ 70°)
+            if (angle >= 20 && angle <= 70) {
+              detectedSlopeSum += slope;
               validLineCount++;
 
-              ctx.lineWidth = 3;
+              // 標示偵測到的線段（青色）
+              ctx.lineWidth = 2;
               ctx.strokeStyle = '#00FFFF';
               ctx.beginPath();
-              ctx.moveTo(subRoiX + x1, subRoiY + y1);
-              ctx.lineTo(subRoiX + x2, subRoiY + y2);
+              ctx.moveTo(slotX + x1, slotY + y1);
+              ctx.lineTo(slotX + x2, slotY + y2);
               ctx.stroke();
             }
           }
         }
 
         // 5. 判定結果
-        ctx.font = 'bold 42px sans-serif';
+        ctx.font = 'bold 40px sans-serif';
         if (validLineCount > 0) {
-          let avgSlope = detectedSlope / validLineCount;
-          let isLType = (avgSlope < 0); 
-          let isRType = (avgSlope > 0); 
+          let avgSlope = detectedSlopeSum / validLineCount;
 
-          if ((currentMode === 'L' && isLType) || (currentMode === 'R' && isRType)) {
+          // 畫面座標系統判定：
+          // avgSlope < 0 -> 左下至右上 (/)
+          // avgSlope > 0 -> 左上至右下 (\)
+          let detectedType = (avgSlope < 0) ? 'L' : 'R';
+
+          if (detectedType === currentMode) {
             ctx.fillStyle = '#00FF00';
-            ctx.fillText('PASS (正確)', w / 2 - 110, productY - earH - 20 > 50 ? productY - earH - 20 : 50);
+            ctx.fillText('PASS (正確)', w / 2 - 110, lensY - 20 > 50 ? lensY - 20 : 50);
           } else {
             ctx.fillStyle = '#FF0000';
-            ctx.fillText('NG (混料/方向錯誤)', w / 2 - 180, productY - earH - 20 > 50 ? productY - earH - 20 : 50);
+            ctx.fillText('NG (方向錯誤)', w / 2 - 130, lensY - 20 > 50 ? lensY - 20 : 50);
           }
         } else {
           ctx.fillStyle = '#FFFF00';
           ctx.font = '20px sans-serif';
-          ctx.fillText('對準中：請將斜特徵放入黃框', w / 2 - 130, productY - earH - 20 > 50 ? productY - earH - 20 : 50);
+          ctx.fillText('請將斜槽對準黃框', w / 2 - 90, lensY - 20 > 50 ? lensY - 20 : 50);
         }
 
         src.delete();
