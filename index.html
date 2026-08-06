@@ -20,15 +20,16 @@
       max-width: 640px;
       margin-top: 10px;
     }
-    /* iOS 必須讓 video 隱藏但不能 display:none */
+/* 徹底修正：給予 video 實質寬高與極小透明度，防止 Safari 认定视频不可见 */
     video {
       position: absolute;
       top: 0;
       left: 0;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0.01; /* 只要不是 0，Safari 就會持續解碼 */
       pointer-events: none;
+      z-index: -1;
     }
     canvas {
       width: 100%;
