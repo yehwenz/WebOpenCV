@@ -92,9 +92,21 @@
           audio: false
         });
         video.srcObject = stream;
+
+        // 關鍵：強迫靜音並播放
         video.muted = true;
-        await video.play();
-        video.addEventListener('loadedmetadata', onVideoReady);
+        video.playsInline = true;
+
+        // 明確呼叫 play()
+        let playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log("iOS Video 播放成功");
+          }).catch(error => {
+            console.error("iOS Video 播放失敗:", error);
+            // 若被檔，嘗試在使用者再次點擊時播放
+          });
+        }
       } catch (err) {
         status.innerText = '無法存取相機: ' + err.message;
         startBtn.disabled = false;
