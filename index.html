@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>雙平台鏡片正反面 AOI 檢測系統</title>
+  <title>數位治具區塊匹配 AOI 檢測系統</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -11,7 +11,7 @@
       color: #ffffff;
       text-align: center;
       margin: 0;
-      padding: 15px;
+      padding: 10px;
     }
     .container {
       position: relative;
@@ -20,14 +20,13 @@
       max-width: 640px;
       margin-top: 10px;
     }
-/* 徹底修正：給予 video 實質寬高與極小透明度，防止 Safari 认定视频不可见 */
     video {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      opacity: 0.01; /* 只要不是 0，Safari 就會持續解碼 */
+      opacity: 0.01;
       pointer-events: none;
       z-index: -1;
     }
@@ -40,35 +39,51 @@
     }
     #status {
       margin: 10px 0;
-      padding: 10px;
+      padding: 8px;
       background-color: #222;
       border-radius: 8px;
       font-size: 14px;
       color: #aaa;
     }
+    .mode-select {
+      margin-bottom: 10px;
+    }
     .btn {
       background-color: #007aff;
       color: white;
       border: none;
-      padding: 12px 24px;
-      font-size: 16px;
+      padding: 10px 20px;
+      font-size: 15px;
       font-weight: bold;
       border-radius: 8px;
       cursor: pointer;
-      margin-bottom: 10px;
+      margin: 3px;
+    }
+    .btn-mode {
+      background-color: #333;
+      border: 2px solid #555;
+    }
+    .btn-mode.active {
+      background-color: #34c759;
+      border-color: #34c759;
+      color: #000;
     }
     .btn:disabled {
       background-color: #444;
       color: #888;
     }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
-  <script>eruda.init();</script>
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
 
-  <h2>鏡片正反面 AOI 比對系統</h2>
+  <h2>鏡片數位治具匹配 AOI 系統</h2>
+  
+  <div class="mode-select">
+    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 邊</button>
+    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">目前產線：R 邊</button>
+  </div>
+
   <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
   <div id="status">等待 OpenCV.js 載入...</div>
 
@@ -86,6 +101,14 @@
     
     let streaming = false;
     let isOpenCvReady = false;
+    let currentMode = 'L'; // 預設產線模式
+
+    function setMode(mode) {
+      currentMode = mode;
+      document.getElementById('modeL').classList.toggle('active', mode === 'L');
+      document.getElementById('modeR').classList.toggle('active', mode === 'R');
+      status.innerText = `已載入 [${mode} 邊] 數位治具模板`;
+    }
 
     function onOpenCvReady() {
       isOpenCvReady = true;
@@ -101,7 +124,6 @@
 
       let stream = null;
       try {
-        // 首選：強化的後鏡頭與解析度設定
         stream = await navigator.mediaDevices.getUserMedia({
           video: { 
             facingMode: { exact: "environment" },
@@ -111,7 +133,6 @@
           audio: false
         });
       } catch (err) {
-        console.warn('強烈後鏡頭請求失敗，改嘗試一般模式:', err);
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: "environment" },
@@ -124,18 +145,13 @@
         }
       }
 
-      // 修正相機掛載與 iOS 播放邏輯
       video.srcObject = stream;
       video.muted = true;
       video.playsInline = true;
 
       try {
-        video.play().then(() => {
-          status.innerText = '相機已播放，等待畫面解析度...';
-        }).catch(err => {
-          status.innerText = 'Video 播放被擋: ' + err.message;
-          // 如果卡在這裡，代表需要作業員再次手動點擊螢幕來 play()
-        });
+        await video.play();
+        status.innerText = '相機啟動成功';
       } catch (playErr) {
         console.error("Video 播放失敗:", playErr);
       }
@@ -150,7 +166,7 @@
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         streaming = true;
-        status.innerText = '請將 [OK樣品] 放左邊區域，[待測品] 放右邊區域';
+        status.innerText = '請將鏡片特徵對準黃色數位治具框';
         startBtn.style.display = 'none';
         
         requestAnimationFrame(processVideo);
@@ -159,45 +175,61 @@
       }
     }
 
-    // 計算 ROI 區域內中央長條的角度
-    function detectAngle(srcMat, roiRect) {
-      let roi = null, gray = null, edges = null, lines = null;
+    // 計算兩個矩形框的重疊率 (Intersection over Union, IoU)
+    function calculateIoU(rect1, rect2) {
+      let xA = Math.max(rect1.x, rect2.x);
+      let yA = Math.max(rect1.y, rect2.y);
+      let xB = Math.min(rect1.x + rect1.width, rect2.x + rect2.width);
+      let yB = Math.min(rect1.y + rect1.height, rect2.y + rect2.height);
+
+      let interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+      let rect1Area = rect1.width * rect1.height;
+      let rect2Area = rect2.width * rect2.height;
+
+      return interArea / parseFloat(rect1Area + rect2Area - interArea);
+    }
+
+    // 取得即時特徵外接矩形框與斜角
+    function detectDetectedBox(srcMat, searchRoi) {
+      let roi = null, gray = null, edges = null, contours = null, hierarchy = null;
       try {
-        roi = srcMat.roi(roiRect);
+        roi = srcMat.roi(searchRoi);
         gray = new cv.Mat();
         edges = new cv.Mat();
-        lines = new cv.Mat();
+        contours = new cv.MatVector();
+        hierarchy = new cv.Mat();
 
         cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
         cv.Canny(gray, edges, 50, 150, 3, false);
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, 30, 10);
+        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
-        let totalAngle = 0;
-        let lineCount = 0;
+        let maxArea = 0;
+        let bestRect = null;
 
-        if (lines && lines.rows > 0) {
-          for (let i = 0; i < lines.rows; ++i) {
-            let x1 = lines.data32S[i * 4];
-            let y1 = lines.data32S[i * 4 + 1];
-            let x2 = lines.data32S[i * 4 + 2];
-            let y2 = lines.data32S[i * 4 + 3];
-
-            let angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI);
-            // 過濾掉接近水平與垂直的邊框，只抓斜長條
-            if (Math.abs(angle) > 15 && Math.abs(angle) < 165) {
-              totalAngle += angle;
-              lineCount++;
-            }
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i);
+          let area = cv.contourArea(cnt);
+          if (area > maxArea && area > 500) { // 過濾雜訊
+            maxArea = area;
+            let rect = cv.boundingRect(cnt);
+            // 轉換為全圖絕對座標
+            bestRect = {
+              x: searchRoi.x + rect.x,
+              y: searchRoi.y + rect.y,
+              width: rect.width,
+              height: rect.height
+            };
           }
         }
-        return lineCount > 0 ? totalAngle / lineCount : null;
+        return bestRect;
       } catch (e) {
         return null;
       } finally {
         if (roi) roi.delete();
         if (gray) gray.delete();
         if (edges) edges.delete();
-        if (lines) lines.delete();
+        if (contours) contours.delete();
+        if (hierarchy) hierarchy.delete();
       }
     }
 
@@ -206,7 +238,6 @@
 
       let src = null;
       try {
-        // 先繪製原始影像到 canvas
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
@@ -215,47 +246,68 @@
 
         let w = canvas.width;
         let h = canvas.height;
-        let roiWidth = Math.floor(w * 0.4);
-        let roiHeight = Math.floor(h * 0.6);
-        let roiY = Math.floor((h - roiHeight) / 2);
 
-        // 左區 (OK 參考) 與 右區 (待測物)
-        let leftRoiRect = new cv.Rect(Math.floor(w * 0.08), roiY, roiWidth, roiHeight);
-        let rightRoiRect = new cv.Rect(Math.floor(w * 0.52), roiY, roiWidth, roiHeight);
+        // 定義搜尋總區域 (畫面上大方框)
+        let searchRoiSize = Math.floor(Math.min(w, h) * 0.6);
+        let searchRoi = new cv.Rect(
+          Math.floor((w - searchRoiSize) / 2),
+          Math.floor((h - searchRoiSize) / 2),
+          searchRoiSize,
+          searchRoiSize
+        );
 
-        // 分別計算兩區長條斜角
-        let leftAngle = detectAngle(src, leftRoiRect);
-        let rightAngle = detectAngle(src, rightRoiRect);
+        // 1. 生成動態數位治具 (Digital Fixture Template)
+        // 正常 L 邊特徵位於偏上方，R 邊位於偏下方 (亦可依據角度定義)
+        let fixtureWidth = Math.floor(searchRoiSize * 0.7);
+        let fixtureHeight = Math.floor(searchRoiSize * 0.3);
+        let fixtureX = searchRoi.x + Math.floor((searchRoiSize - fixtureWidth) / 2);
+        
+        // 當旋轉 180° 或 L/R 混料時，特徵Y軸位置會產生極大位移
+        let fixtureY = (currentMode === 'L') 
+          ? searchRoi.y + Math.floor(searchRoiSize * 0.15) 
+          : searchRoi.y + Math.floor(searchRoiSize * 0.55);
 
-        // 畫出對準框
+        let digitalFixture = { x: fixtureX, y: fixtureY, width: fixtureWidth, height: fixtureHeight };
+
+        // 畫出數位治具 (黃色虛線框)
+        ctx.save();
         ctx.lineWidth = 3;
-        ctx.strokeStyle = '#00FFFF';
-        ctx.strokeRect(leftRoiRect.x, leftRoiRect.y, leftRoiRect.width, leftRoiRect.height);
-        ctx.strokeRect(rightRoiRect.x, rightRoiRect.y, rightRoiRect.width, rightRoiRect.height);
+        ctx.strokeStyle = '#FFCC00';
+        ctx.setLineDash([8, 6]);
+        ctx.strokeRect(digitalFixture.x, digitalFixture.y, digitalFixture.width, digitalFixture.height);
+        ctx.restore();
 
-        ctx.fillStyle = '#00FFFF';
-        ctx.font = 'bold 16px sans-serif';
-        ctx.fillText('左: OK 參考物', leftRoiRect.x + 10, leftRoiRect.y + 25);
-        ctx.fillText('右: 待測物', rightRoiRect.x + 10, rightRoiRect.y + 25);
+        ctx.fillStyle = '#FFCC00';
+        ctx.font = 'bold 15px sans-serif';
+        ctx.fillText(`數位治具 [${currentMode} 邊標準位置]`, digitalFixture.x, digitalFixture.y - 8);
 
-        // 判斷 OK/NG (斜角方向比對)
-        if (leftAngle !== null && rightAngle !== null) {
-          let angleDiff = Math.abs(leftAngle - rightAngle);
-          // 同向 (角度差小於 30 或接近 180) 判定 PASS，否則裝反判定 NG
-          let isPass = angleDiff < 30 || angleDiff > 150;
+        // 2. 偵測實體特徵框
+        let detectedBox = detectDetectedBox(src, searchRoi);
+
+        if (detectedBox !== null) {
+          // 計算實體框與數位治具的 IoU 重疊度
+          let iou = calculateIoU(detectedBox, digitalFixture);
+
+          // 畫出實體偵測框
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = iou > 0.45 ? '#00FF00' : '#FF0000';
+          ctx.strokeRect(detectedBox.x, detectedBox.y, detectedBox.width, detectedBox.height);
 
           ctx.font = 'bold 44px sans-serif';
-          if (isPass) {
+
+          // 判斷是否通過匹配 (IoU > 45%)
+          if (iou > 0.45) {
             ctx.fillStyle = '#00FF00';
-            ctx.fillText('PASS (正常)', w / 2 - 110, 70);
+            ctx.fillText('PASS (Match)', w / 2 - 130, searchRoi.y - 25 > 50 ? searchRoi.y - 25 : 50);
           } else {
+            // IoU 太低：代表特徵位置偏差（裝反、混料或旋轉 180°）
             ctx.fillStyle = '#FF0000';
-            ctx.fillText('NG (裝反)', w / 2 - 90, 70);
+            ctx.fillText('NG (位置不符/裝反)', w / 2 - 180, searchRoi.y - 25 > 50 ? searchRoi.y - 25 : 50);
           }
         } else {
           ctx.fillStyle = '#FFFF00';
           ctx.font = '18px sans-serif';
-          ctx.fillText('對焦中...請將鏡片置於兩側區域內', w / 2 - 140, 50);
+          ctx.fillText('請將鏡片放入搜尋區域內', w / 2 - 110, searchRoi.y - 25 > 50 ? searchRoi.y - 25 : 50);
         }
 
       } catch (err) {
