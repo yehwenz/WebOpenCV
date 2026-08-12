@@ -7,10 +7,9 @@
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      /* 1. 背景色改為白色，與圖片一致 */
-      background-color: #ffffff;
-      /* 2. 文字顏色預設為深色，與白色背景對比 */
-      color: #333333;
+      /* 改為全黑背景 */
+      background-color: #121212;
+      color: #ffffff;
       text-align: center;
       margin: 0;
       padding: 10px;
@@ -29,36 +28,34 @@
     }
     canvas {
       width: 100%; height: auto;
-      /* 3. 畫布背景色改為白色，與圖片一致 */
-      background-color: #ffffff; 
+      background-color: #000000;
       border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1); /* 調整陰影顏色 */
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
     #status {
-      margin: 10px 0; padding: 8px; background-color: #f5f5f5; /* 4. 狀態列背景色改為淡灰 */
-      border-radius: 8px; font-size: 14px; color: #666; /* 5. 狀態列文字顏色調整 */
+      margin: 10px 0; padding: 8px; background-color: #222222;
+      border-radius: 8px; font-size: 14px; color: #aaaaaa;
     }
     .detection-info { 
-      margin-bottom: 20px; 
+      margin-bottom: 15px; 
       display: flex;
       justify-content: center;
-      gap: 20px;
+      align-items: center;
+      gap: 10px;
     }
-    /* 6. 定義圖片中的深藍色外框樣式 */
     .outer-frame {
-      border: 2px solid #004080; /* 深藍色 */
-      border-radius: 50px; /* 圓角半徑 */
-      padding: 15px 30px;
+      border: 2px solid #007aff;
+      border-radius: 50px;
+      padding: 10px 20px;
       display: inline-flex;
       align-items: center;
       font-weight: bold;
-      color: #004080;
+      color: #007aff;
     }
-    /* 7. 定義圖片中的黃色內框樣式 */
     .inner-frame {
-      border: 2px solid #ffcc00; /* 黃色 */
-      border-radius: 20px; /* 圓角半徑 */
-      padding: 8px 15px;
+      border: 2px solid #ffcc00;
+      border-radius: 20px;
+      padding: 4px 12px;
       display: inline-flex;
       align-items: center;
       font-weight: bold;
@@ -67,19 +64,17 @@
     }
     .btn {
       background-color: #007aff; color: white; border: none;
-      padding: 12px 24px; font-size: 16px; font-weight: bold;
+      padding: 10px 20px; font-size: 15px; font-weight: bold;
       border-radius: 8px; cursor: pointer; margin: 3px;
     }
-    .btn:disabled { background-color: #444; color: #888; }
-
-    /* 隱藏原本的模式選擇按鈕 */
-    .mode-select { display: none; }
+    .btn-mode { background-color: #333333; color: #aaa; border: 1px solid #555; }
+    .btn-mode.active { background-color: #34c759; color: #000; border-color: #34c759; }
+    .btn:disabled { background-color: #444444; color: #888888; }
   </style>
   <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
 
-  <!-- 8. 使用新的框線結構來顯示模式資訊，與圖片一致 -->
   <div class="detection-info">
     <div class="outer-frame" id="outerFrame">
       目前產線：<span id="currentModeText">L</span> 邊
@@ -89,11 +84,9 @@
     </div>
   </div>
 
-  <h2>車燈鏡片斜槽特徵 AOI 檢測</h2>
-  
-  <div class="mode-select">
-    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 邊 (預期斜線 /)</button>
-    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">目前產線：R 邊 (預期斜線 \)</button>
+  <div style="margin-bottom: 10px;">
+    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">切換 L 邊 (/)</button>
+    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">切換 R 邊 (\)</button>
   </div>
 
   <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
@@ -119,7 +112,8 @@
       currentMode = mode;
       document.getElementById('currentModeText').innerText = mode;
       document.getElementById('slopeSign').innerText = (mode === 'L' ? '/' : '\\');
-      // 更新深藍色外框和黃色內框的顯示，與原本按鈕邏輯分離
+      document.getElementById('modeL').classList.toggle('active', mode === 'L');
+      document.getElementById('modeR').classList.toggle('active', mode === 'R');
       status.innerText = `已切換至 [${mode} 邊] 檢測模式`;
     }
 
@@ -175,85 +169,124 @@
     function processFrame() {
       if (!streaming) return;
 
-      // 9. 繪製攝影機影像，背景為白色
-      ctx.fillStyle = "#ffffff";
+      // 純黑背景
+      ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       let w = canvas.width;
       let h = canvas.height;
 
-      // 10. 畫出「深藍色圓角鏡片外框」，與圖片一致
+      // 藍色鏡片目標框範圍
       let lensW = Math.floor(w * 0.55);
       let lensH = Math.floor(lensW * 0.65);
       let lensX = Math.floor((w - lensW) / 2);
       let lensY = Math.floor((h - lensH) / 2);
-      let cornerRadius = 50; // 與 HTML 的圓角一致
 
       ctx.save();
       ctx.lineWidth = 3;
-      ctx.strokeStyle = '#004080'; // 深藍色
+      ctx.strokeStyle = '#007aff';
       ctx.beginPath();
-      ctx.roundRect(lensX, lensY, lensW, lensH, cornerRadius);
+      ctx.roundRect(lensX, lensY, lensW, lensH, 40);
       ctx.stroke();
-
-      // 移除文字，使外框更像圖片
       ctx.restore();
 
-      // 11. 設定斜矩形中心與維度
-      let centerX = lensX + lensW / 2;
-      let centerY = lensY + lensH / 2;
-      let rectW = Math.floor(lensW * 0.55);
-      let rectH = Math.floor(lensH * 0.22);
-      
-      // 依 L/R 邊設定傾斜角度 (L邊: -25度, R邊: +25度)
+      // 旋轉角度 (L邊: -25度, R邊: +25度)
       let angleDeg = (currentMode === 'L') ? -25 : 25;
       let angleRad = angleDeg * Math.PI / 180;
 
-      // 12. 繪製「傾斜黃色檢測矩形框」，與圖片一致
+      let centerX = lensX + lensW / 2;
+      let centerY = lensY + lensH / 2;
+      let rectW = Math.floor(lensW * 0.50);
+      let rectH = Math.floor(lensH * 0.25);
+
+      // 黃色斜槽目標框
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(angleRad);
-
       ctx.lineWidth = 3;
-      ctx.strokeStyle = '#ffcc00'; // 黃色
+      ctx.strokeStyle = '#ffcc00';
       ctx.beginPath();
-      // 使用圓角矩形框，與 HTML 一致
-      ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, 20); 
+      ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, 15);
       ctx.stroke();
-
-      // 移除文字，使內框更像圖片
       ctx.restore();
 
-      // 13. OpenCV 斜向 ROI 旋轉校正與檢測
       try {
         let src = cv.imread(canvas);
         let gray = new cv.Mat();
-        let edges = new cv.Mat();
-        let lines = new cv.Mat();
-        let rotatedROI = new cv.Mat();
+        let binary = new cv.Mat();
+        let contours = new cv.MatVector();
+        let hierarchy = new cv.Mat();
 
-        // 建立仿射變換矩陣，將傾斜矩形旋轉回水平方向
+        // 裁切藍框區域來判斷燈具本體是否存在
+        let lensRoiRect = new cv.Rect(lensX, lensY, lensW, lensH);
+        let lensRoi = src.roi(lensRoiRect);
+
+        cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
+        cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+        
+        // 自適應二值化捕捉輪廓
+        cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
+        cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        let maxArea = 0;
+        let bestContourRect = null;
+
+        for (let i = 0; i < contours.size(); ++i) {
+          let cnt = contours.get(i);
+          let area = cv.contourArea(cnt);
+          if (area > maxArea) {
+            maxArea = area;
+            bestContourRect = cv.boundingRect(cnt);
+          }
+        }
+
+        let expectedMinArea = (lensW * lensH) * 0.30;
+
+        // --- STEP 1: 燈具存在性檢測 ---
+        if (maxArea < expectedMinArea) {
+          ctx.font = 'bold 22px sans-serif';
+          ctx.fillStyle = '#aaaaaa'; // 黑色背景下使用淺灰色文字
+          ctx.fillText('請將燈具置於檢測範圍', w / 2 - 110, lensY - 20 > 40 ? lensY - 20 : 40);
+
+          src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
+          requestAnimationFrame(processFrame);
+          return;
+        }
+
+        // --- STEP 2: 燈具外觀規格比對 ---
+        let aspectRatio = bestContourRect.width / parseFloat(bestContourRect.height);
+        if (aspectRatio < 1.1 || aspectRatio > 2.2) {
+          ctx.font = 'bold 22px sans-serif';
+          ctx.fillStyle = '#ff4d4d'; // 黑色背景下使用亮紅色
+          ctx.fillText('非該燈具產品或擺放角度偏差過大', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
+
+          src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
+          requestAnimationFrame(processFrame);
+          return;
+        }
+
+        // --- STEP 3: 斜槽精準 Match 檢測 ---
+        let rotatedROI = new cv.Mat();
         let centerPoint = new cv.Point(centerX, centerY);
         let M = cv.getRotationMatrix2D(centerPoint, angleDeg, 1.0);
-        
         cv.warpAffine(src, rotatedROI, M, src.size());
 
-        // 裁切校正後的水平長方形 ROI
         let roiRect = new cv.Rect(centerX - rectW / 2, centerY - rectH / 2, rectW, rectH);
-        let roi = rotatedROI.roi(roiRect);
+        let slotRoi = rotatedROI.roi(roiRect);
 
-        cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
-        
-        let ksize = new cv.Size(5, 5);
-        cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
+        let slotGray = new cv.Mat();
+        let edges = new cv.Mat();
+        let lines = new cv.Mat();
 
-        // Canny 邊緣檢測
-        cv.Canny(gray, edges, 50, 150, 3, false);
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 25, 30, 10);
+        cv.cvtColor(slotRoi, slotGray, cv.COLOR_RGBA2GRAY, 0);
+        cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+        cv.Canny(slotGray, edges, 80, 200, 3, false);
 
-        let validLineCount = 0;
+        let minLineLength = Math.floor(rectW * 0.65);
+        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, minLineLength, 5);
 
+        let horizontalLines = [];
         for (let i = 0; i < lines.rows; ++i) {
           let x1 = lines.data32S[i * 4];
           let y1 = lines.data32S[i * 4 + 1];
@@ -267,53 +300,72 @@
             let slope = dy / dx;
             let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
 
-            // 校正後槽位邊緣應接近水平 (角度 < 25 度)
-            if (angle <= 25) {
-              validLineCount++;
-
-              // 轉換座標並繪製偵測到的槽位邊緣 (青色)
-              let cosA = Math.cos(angleRad);
-              let sinA = Math.sin(angleRad);
-
-              let lx1 = x1 - rectW / 2;
-              let ly1 = y1 - rectH / 2;
-              let lx2 = x2 - rectW / 2;
-              let ly2 = y2 - rectH / 2;
-
-              let worldX1 = centerX + (lx1 * cosA - ly1 * sinA);
-              let worldY1 = centerY + (lx1 * sinA + ly1 * cosA);
-              let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
-              let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
-
-              ctx.lineWidth = 2;
-              ctx.strokeStyle = '#00FFFF';
-              ctx.beginPath();
-              ctx.moveTo(worldX1, worldY1);
-              ctx.lineTo(worldX2, worldY2);
-              ctx.stroke();
+            if (angle <= 5) {
+              let avgY = (y1 + y2) / 2;
+              let midX = (x1 + x2) / 2;
+              horizontalLines.push({ x1, y1, x2, y2, avgY, midX });
             }
           }
         }
 
-        // 14. 判定結果文字顏色調整為與白色背景對比
-        ctx.font = 'bold 40px sans-serif';
-        if (validLineCount >= 2) {
-          ctx.fillStyle = '#006400'; // 深綠色，在白色背景更清楚
-          ctx.fillText('PASS (特徵正確)', w / 2 - 140, lensY - 20 > 50 ? lensY - 20 : 50);
-        } else {
-          ctx.fillStyle = '#8B8B00'; // 深黃色，在白色背景更清楚
-          ctx.font = '20px sans-serif';
-          ctx.fillText('請將斜槽對準黃色斜框', w / 2 - 110, lensY - 20 > 50 ? lensY - 20 : 50);
+        let validSlotFound = false;
+        let minSlotWidth = 10;
+        let maxSlotWidth = 30;
+        let matchedLines = [];
+        let roiCenterX = rectW / 2;
+
+        for (let i = 0; i < horizontalLines.length; i++) {
+          for (let j = i + 1; j < horizontalLines.length; j++) {
+            let l1 = horizontalLines[i];
+            let l2 = horizontalLines[j];
+
+            let distY = Math.abs(l1.avgY - l2.avgY);
+            let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
+
+            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.12)) {
+              validSlotFound = true;
+              matchedLines.push(l1, l2);
+              break;
+            }
+          }
+          if (validSlotFound) break;
         }
 
-        // 記憶體釋放
-        src.delete();
-        gray.delete();
-        edges.delete();
-        lines.delete();
-        rotatedROI.delete();
-        roi.delete();
-        M.delete();
+        // --- STEP 4: 判定結果畫線與提示 ---
+        if (validSlotFound) {
+          matchedLines.forEach(line => {
+            let cosA = Math.cos(angleRad);
+            let sinA = Math.sin(angleRad);
+
+            let lx1 = line.x1 - rectW / 2;
+            let ly1 = line.y1 - rectH / 2;
+            let lx2 = line.x2 - rectW / 2;
+            let ly2 = line.y2 - rectH / 2;
+
+            let worldX1 = centerX + (lx1 * cosA - ly1 * sinA);
+            let worldY1 = centerY + (lx1 * sinA + ly1 * cosA);
+            let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
+            let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
+
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#00FFFF'; // 青色發光線
+            ctx.beginPath();
+            ctx.moveTo(worldX1, worldY1);
+            ctx.lineTo(worldX2, worldY2);
+            ctx.stroke();
+          });
+
+          ctx.font = 'bold 36px sans-serif';
+          ctx.fillStyle = '#34c759'; // 亮綠色 PASS
+          ctx.fillText('PASS (斜槽完美對齊)', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
+        } else {
+          ctx.font = 'bold 22px sans-serif';
+          ctx.fillStyle = '#ff4d4d'; // 亮紅色 NG
+          ctx.fillText('NG / 請將斜槽完全對準黃色框', w / 2 - 140, lensY - 20 > 40 ? lensY - 20 : 40);
+        }
+
+        src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); 
+        lensRoi.delete(); rotatedROI.delete(); slotRoi.delete(); slotGray.delete(); edges.delete(); lines.delete(); M.delete();
 
       } catch (err) {
         console.error("OpenCV 分析錯誤:", err);
