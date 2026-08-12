@@ -168,98 +168,73 @@
     function processFrame() {
       if (!streaming) return;
 
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
       let w = canvas.width;
       let h = canvas.height;
 
-      // 1. 修正藍色燈具外框比例（與原圖一致的圓角大矩形）
+      // 藍色燈具外框繪製座標
       let lensW = Math.floor(w * 0.65);
       let lensH = Math.floor(lensW * 0.70);
       let lensX = Math.floor((w - lensW) / 2);
       let lensY = Math.floor((h - lensH) / 2);
 
-      ctx.save();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#007aff';
-      ctx.beginPath();
-      ctx.roundRect(lensX, lensY, lensW, lensH, 80); // 大圓角
-      ctx.stroke();
-      ctx.restore();
-
-      // 2. 修正斜槽幾何（長條膠囊狀，角度約 35 度）
       let angleDeg = (currentMode === 'L') ? -35 : 35;
       let angleRad = angleDeg * Math.PI / 180;
 
       let centerX = lensX + lensW / 2;
       let centerY = lensY + lensH / 2;
       
-      // 依原圖比例：極長的長條形膠囊，寬度長，高度窄
-      let rectW = Math.floor(lensW * 0.58); // 長條長度
-      let rectH = Math.floor(rectW * 0.16);  // 長條寬度 (長寬比約 6:1)
-
-      // 繪製黃色膠囊狀斜槽框
-      ctx.save();
-      ctx.translate(centerX, centerY);
-      ctx.rotate(angleRad);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#ffcc00';
-      ctx.beginPath();
-      ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, rectH / 2); // 半圓形膠囊兩端
-      ctx.stroke();
-      ctx.restore();
+      let rectW = Math.floor(lensW * 0.58);
+      let rectH = Math.floor(rectW * 0.16);
 
       try {
-        let src = cv.imread(canvas);
+        // 【關鍵修正 1】直接從原始 Video 讀取影像，完全不包含繪製出來的 UI 黃框與藍框
+        let src = cv.imread(video);
         let gray = new cv.Mat();
-        let binary = new cv.Mat();
+        let edges = new cv.Mat();
         let contours = new cv.MatVector();
         let hierarchy = new cv.Mat();
 
-        // STEP 1: 物體存在性檢測
         let lensRoiRect = new cv.Rect(lensX, lensY, lensW, lensH);
         let lensRoi = src.roi(lensRoiRect);
 
         cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
         cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+
+        // 【關鍵修正 2】改用精準的 Canny 邊緣檢測來計算真實實體輪廓，不再用 Otsu 放大背景雜訊
+        cv.Canny(gray, edges, 100, 200, 3, false);
+        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+        let totalEdgePixels = cv.countNonZero(edges);
         
-        cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
-        cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+        // 要求藍框內部必須有足夠的「強邊緣像素」（代表有實體鏡片放置）
+        let minRequiredEdgePixels = (lensW * lensH) * 0.02; // 至少 2% 的邊緣量
 
-        let maxArea = 0;
-        let bestContourRect = null;
+        // 先把原圖畫上 Canvas 作為背景
+        ctx.drawImage(video, 0, 0, w, h);
 
-        for (let i = 0; i < contours.size(); ++i) {
-          let cnt = contours.get(i);
-          let area = cv.contourArea(cnt);
-          if (area > maxArea) {
-            maxArea = area;
-            bestContourRect = cv.boundingRect(cnt);
-          }
-        }
+        // 畫上 UI 框
+        ctx.save();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#007aff';
+        ctx.beginPath();
+        ctx.roundRect(lensX, lensY, lensW, lensH, 80);
+        ctx.stroke();
 
-        let expectedMinArea = (lensW * lensH) * 0.30;
+        ctx.translate(centerX, centerY);
+        ctx.rotate(angleRad);
+        ctx.strokeStyle = '#ffcc00';
+        ctx.beginPath();
+        ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, rectH / 2);
+        ctx.stroke();
+        ctx.restore();
 
-        if (maxArea < expectedMinArea) {
+        // 檢查 1：無物件放入
+        if (totalEdgePixels < minRequiredEdgePixels) {
           ctx.font = 'bold 22px sans-serif';
           ctx.fillStyle = '#aaaaaa';
           ctx.fillText('請將燈具置於檢測範圍', w / 2 - 110, lensY - 20 > 40 ? lensY - 20 : 40);
 
-          src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
-          requestAnimationFrame(processFrame);
-          return;
-        }
-
-        // STEP 2: 外觀長寬比過濾
-        let aspectRatio = bestContourRect.width / parseFloat(bestContourRect.height);
-        if (aspectRatio < 1.0 || aspectRatio > 2.2) {
-          ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#ff4d4d';
-          ctx.fillText('非該燈具產品或擺放角度偏差過大', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
-
-          src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
+          src.delete(); gray.delete(); edges.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
           requestAnimationFrame(processFrame);
           return;
         }
@@ -274,16 +249,15 @@
         let slotRoi = rotatedROI.roi(roiRect);
 
         let slotGray = new cv.Mat();
-        let edges = new cv.Mat();
+        let slotEdges = new cv.Mat();
         let lines = new cv.Mat();
 
         cv.cvtColor(slotRoi, slotGray, cv.COLOR_RGBA2GRAY, 0);
         cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-        cv.Canny(slotGray, edges, 80, 200, 3, false);
+        cv.Canny(slotGray, slotEdges, 80, 200, 3, false);
 
-        // 長條狀斜槽線段長度必須達到黃色長條寬度的 70% 以上
-        let minLineLength = Math.floor(rectW * 0.70);
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, minLineLength, 5);
+        let minLineLength = Math.floor(rectW * 0.65);
+        cv.HoughLinesP(slotEdges, lines, 1, Math.PI / 180, 35, minLineLength, 5);
 
         let horizontalLines = [];
         for (let i = 0; i < lines.rows; ++i) {
@@ -299,7 +273,8 @@
             let slope = dy / dx;
             let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
 
-            if (angle <= 5) {
+            // 嚴格轉正角度限在 4 度內
+            if (angle <= 4) {
               let avgY = (y1 + y2) / 2;
               let midX = (x1 + x2) / 2;
               horizontalLines.push({ x1, y1, x2, y2, avgY, midX });
@@ -321,7 +296,7 @@
             let distY = Math.abs(l1.avgY - l2.avgY);
             let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
 
-            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.10)) {
+            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.08)) {
               validSlotFound = true;
               matchedLines.push(l1, l2);
               break;
@@ -330,7 +305,7 @@
           if (validSlotFound) break;
         }
 
-        // STEP 4: 結果判定與渲染
+        // STEP 4: 結果繪製與提示
         if (validSlotFound) {
           matchedLines.forEach(line => {
             let cosA = Math.cos(angleRad);
@@ -363,8 +338,8 @@
           ctx.fillText('NG / 請將斜槽完全對準黃色框', w / 2 - 140, lensY - 20 > 40 ? lensY - 20 : 40);
         }
 
-        src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); 
-        lensRoi.delete(); rotatedROI.delete(); slotRoi.delete(); slotGray.delete(); edges.delete(); lines.delete(); M.delete();
+        src.delete(); gray.delete(); edges.delete(); contours.delete(); hierarchy.delete(); 
+        lensRoi.delete(); rotatedROI.delete(); slotRoi.delete(); slotGray.delete(); slotEdges.delete(); lines.delete(); M.delete();
 
       } catch (err) {
         console.error("OpenCV 分析錯誤:", err);
