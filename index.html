@@ -51,7 +51,7 @@
   <h2>車燈鏡片斜槽特徵 AOI 檢測</h2>
   
   <div class="mode-select">
-    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 边 (預期斜線 /)</button>
+    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">目前產線：L 邊 (預期斜線 /)</button>
     <button id="modeR" class="btn btn-mode" onclick="setMode('R')">目前產線：R 邊 (預期斜線 \)</button>
   </div>
 
@@ -139,72 +139,76 @@
       let w = canvas.width;
       let h = canvas.height;
 
-      // 2. 畫出「鏡片範圍框」（綠色矩形）
-      let lensW = Math.floor(w * 0.50);
-      let lensH = Math.floor(lensW * 0.70);
+      // 2. 畫出「藍色圓角鏡片外框」
+      let lensW = Math.floor(w * 0.55);
+      let lensH = Math.floor(lensW * 0.65);
       let lensX = Math.floor((w - lensW) / 2);
       let lensY = Math.floor((h - lensH) / 2);
-
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#00FF00';
-      ctx.strokeRect(lensX, lensY, lensW, lensH);
-
-      ctx.fillStyle = '#00FF00';
-      ctx.font = 'bold 16px sans-serif';
-      ctx.fillText('鏡片範圍', lensX, lensY - 8);
-
-      // 3. 畫出「斜槽檢測區域」（黃色虛線框）
-      let slotW = Math.floor(lensW * 0.60);
-      let slotH = Math.floor(lensH * 0.50);
-      let slotX = lensX + Math.floor((lensW - slotW) / 2);
-      let slotY = lensY + Math.floor((lensH - slotH) / 2);
+      let cornerRadius = 24;
 
       ctx.save();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#FFCC00';
-      ctx.setLineDash([6, 6]);
-      ctx.strokeRect(slotX, slotY, slotW, slotH);
-
-      // 畫出預期斜槽線段
       ctx.lineWidth = 3;
+      ctx.strokeStyle = '#007aff';
       ctx.beginPath();
-      if (currentMode === 'L') {
-        // L 邊 (轉90度後)：左下至右上 (/)
-        ctx.moveTo(slotX + slotW * 0.2, slotY + slotH * 0.8);
-        ctx.lineTo(slotX + slotW * 0.8, slotY + slotH * 0.2);
-      } else {
-        // R 邊 (轉90度後)：左上至右下 (\)
-        ctx.moveTo(slotX + slotW * 0.2, slotY + slotH * 0.2);
-        ctx.lineTo(slotX + slotW * 0.8, slotY + slotH * 0.8);
-      }
+      ctx.roundRect(lensX, lensY, lensW, lensH, cornerRadius);
       ctx.stroke();
+
+      ctx.fillStyle = '#007aff';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText('鏡片範圍', lensX, lensY - 10);
       ctx.restore();
 
-      ctx.fillStyle = '#FFCC00';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.fillText(`[${currentMode} 邊] 斜槽區域`, slotX, slotY - 6);
+      // 3. 設定斜矩形中心與維度
+      let centerX = lensX + lensW / 2;
+      let centerY = lensY + lensH / 2;
+      let rectW = Math.floor(lensW * 0.55);
+      let rectH = Math.floor(lensH * 0.22);
+      
+      // 依 L/R 邊設定傾斜角度 (L邊: -25度, R邊: +25度)
+      let angleDeg = (currentMode === 'L') ? -25 : 25;
+      let angleRad = angleDeg * Math.PI / 180;
 
-      // 4. OpenCV 演算法：檢測斜槽方向
+      // 4. 繪製「傾斜黃色檢測矩形框」
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(angleRad);
+
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffcc00';
+      ctx.strokeRect(-rectW / 2, -rectH / 2, rectW, rectH);
+
+      ctx.fillStyle = '#ffcc00';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`[${currentMode} 邊] 斜槽檢測區`, -rectW / 2, -rectH / 2 - 8);
+      ctx.restore();
+
+      // 5. OpenCV 斜向 ROI 旋轉校正與檢測
       try {
         let src = cv.imread(canvas);
         let gray = new cv.Mat();
         let edges = new cv.Mat();
         let lines = new cv.Mat();
+        let rotatedROI = new cv.Mat();
 
-        let rectROI = new cv.Rect(slotX, slotY, slotW, slotH);
-        let roi = src.roi(rectROI);
+        // 建立仿射變換矩陣，將傾斜矩形旋轉回水平方向
+        let centerPoint = new cv.Point(centerX, centerY);
+        let M = cv.getRotationMatrix2D(centerPoint, angleDeg, 1.0);
+        
+        cv.warpAffine(src, rotatedROI, M, src.size());
+
+        // 裁切校正後的水平長方形 ROI
+        let roiRect = new cv.Rect(centerX - rectW / 2, centerY - rectH / 2, rectW, rectH);
+        let roi = rotatedROI.roi(roiRect);
 
         cv.cvtColor(roi, gray, cv.COLOR_RGBA2GRAY, 0);
         
-        // 模糊平滑背景
         let ksize = new cv.Size(5, 5);
         cv.GaussianBlur(gray, gray, ksize, 0, 0, cv.BORDER_DEFAULT);
 
-        // 邊緣提取與直線檢測
+        // Canny 邊緣檢測
         cv.Canny(gray, edges, 50, 150, 3, false);
-        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 30, 40, 10);
+        cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 25, 30, 10);
 
-        let detectedSlopeSum = 0;
         let validLineCount = 0;
 
         for (let i = 0; i < lines.rows; ++i) {
@@ -217,54 +221,56 @@
           let dy = y2 - y1;
 
           if (dx !== 0) {
-            // 影像座標系：Y軸向下，因此 dy/dx < 0 實質代表左下至右上 (/)
             let slope = dy / dx;
             let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
 
-            // 過濾掉接近水平與垂直的邊緣，只取斜角 (20° ~ 70°)
-            if (angle >= 20 && angle <= 70) {
-              detectedSlopeSum += slope;
+            // 校正後槽位邊緣應接近水平 (角度 < 25 度)
+            if (angle <= 25) {
               validLineCount++;
 
-              // 標示偵測到的線段（青色）
+              // 轉換座標並繪製偵測到的槽位邊緣 (青色)
+              let cosA = Math.cos(angleRad);
+              let sinA = Math.sin(angleRad);
+
+              let lx1 = x1 - rectW / 2;
+              let ly1 = y1 - rectH / 2;
+              let lx2 = x2 - rectW / 2;
+              let ly2 = y2 - rectH / 2;
+
+              let worldX1 = centerX + (lx1 * cosA - ly1 * sinA);
+              let worldY1 = centerY + (lx1 * sinA + ly1 * cosA);
+              let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
+              let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
+
               ctx.lineWidth = 2;
               ctx.strokeStyle = '#00FFFF';
               ctx.beginPath();
-              ctx.moveTo(slotX + x1, slotY + y1);
-              ctx.lineTo(slotX + x2, slotY + y2);
+              ctx.moveTo(worldX1, worldY1);
+              ctx.lineTo(worldX2, worldY2);
               ctx.stroke();
             }
           }
         }
 
-        // 5. 判定結果
+        // 6. 判定結果
         ctx.font = 'bold 40px sans-serif';
-        if (validLineCount > 0) {
-          let avgSlope = detectedSlopeSum / validLineCount;
-
-          // 畫面座標系統判定：
-          // avgSlope < 0 -> 左下至右上 (/)
-          // avgSlope > 0 -> 左上至右下 (\)
-          let detectedType = (avgSlope < 0) ? 'L' : 'R';
-
-          if (detectedType === currentMode) {
-            ctx.fillStyle = '#00FF00';
-            ctx.fillText('PASS (正確)', w / 2 - 110, lensY - 20 > 50 ? lensY - 20 : 50);
-          } else {
-            ctx.fillStyle = '#FF0000';
-            ctx.fillText('NG (方向錯誤)', w / 2 - 130, lensY - 20 > 50 ? lensY - 20 : 50);
-          }
+        if (validLineCount >= 2) {
+          ctx.fillStyle = '#00FF00';
+          ctx.fillText('PASS (特徵正確)', w / 2 - 140, lensY - 20 > 50 ? lensY - 20 : 50);
         } else {
           ctx.fillStyle = '#FFFF00';
           ctx.font = '20px sans-serif';
-          ctx.fillText('請將斜槽對準黃框', w / 2 - 90, lensY - 20 > 50 ? lensY - 20 : 50);
+          ctx.fillText('請將斜槽對準黃色斜框', w / 2 - 110, lensY - 20 > 50 ? lensY - 20 : 50);
         }
 
+        // 記憶體釋放
         src.delete();
         gray.delete();
         edges.delete();
         lines.delete();
+        rotatedROI.delete();
         roi.delete();
+        M.delete();
 
       } catch (err) {
         console.error("OpenCV 分析錯誤:", err);
