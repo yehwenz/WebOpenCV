@@ -7,7 +7,6 @@
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      /* 改為全黑背景 */
       background-color: #121212;
       color: #ffffff;
       text-align: center;
@@ -169,7 +168,6 @@
     function processFrame() {
       if (!streaming) return;
 
-      // 純黑背景
       ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -177,9 +175,9 @@
       let w = canvas.width;
       let h = canvas.height;
 
-      // 藍色鏡片目標框範圍
-      let lensW = Math.floor(w * 0.55);
-      let lensH = Math.floor(lensW * 0.65);
+      // 1. 修正藍色燈具外框比例（與原圖一致的圓角大矩形）
+      let lensW = Math.floor(w * 0.65);
+      let lensH = Math.floor(lensW * 0.70);
       let lensX = Math.floor((w - lensW) / 2);
       let lensY = Math.floor((h - lensH) / 2);
 
@@ -187,27 +185,29 @@
       ctx.lineWidth = 3;
       ctx.strokeStyle = '#007aff';
       ctx.beginPath();
-      ctx.roundRect(lensX, lensY, lensW, lensH, 40);
+      ctx.roundRect(lensX, lensY, lensW, lensH, 80); // 大圓角
       ctx.stroke();
       ctx.restore();
 
-      // 旋轉角度 (L邊: -25度, R邊: +25度)
-      let angleDeg = (currentMode === 'L') ? -25 : 25;
+      // 2. 修正斜槽幾何（長條膠囊狀，角度約 35 度）
+      let angleDeg = (currentMode === 'L') ? -35 : 35;
       let angleRad = angleDeg * Math.PI / 180;
 
       let centerX = lensX + lensW / 2;
       let centerY = lensY + lensH / 2;
-      let rectW = Math.floor(lensW * 0.50);
-      let rectH = Math.floor(lensH * 0.25);
+      
+      // 依原圖比例：極長的長條形膠囊，寬度長，高度窄
+      let rectW = Math.floor(lensW * 0.58); // 長條長度
+      let rectH = Math.floor(rectW * 0.16);  // 長條寬度 (長寬比約 6:1)
 
-      // 黃色斜槽目標框
+      // 繪製黃色膠囊狀斜槽框
       ctx.save();
       ctx.translate(centerX, centerY);
       ctx.rotate(angleRad);
       ctx.lineWidth = 3;
       ctx.strokeStyle = '#ffcc00';
       ctx.beginPath();
-      ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, 15);
+      ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, rectH / 2); // 半圓形膠囊兩端
       ctx.stroke();
       ctx.restore();
 
@@ -218,14 +218,13 @@
         let contours = new cv.MatVector();
         let hierarchy = new cv.Mat();
 
-        // 裁切藍框區域來判斷燈具本體是否存在
+        // STEP 1: 物體存在性檢測
         let lensRoiRect = new cv.Rect(lensX, lensY, lensW, lensH);
         let lensRoi = src.roi(lensRoiRect);
 
         cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
         cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
         
-        // 自適應二值化捕捉輪廓
         cv.threshold(gray, binary, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
         cv.findContours(binary, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
@@ -243,10 +242,9 @@
 
         let expectedMinArea = (lensW * lensH) * 0.30;
 
-        // --- STEP 1: 燈具存在性檢測 ---
         if (maxArea < expectedMinArea) {
           ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#aaaaaa'; // 黑色背景下使用淺灰色文字
+          ctx.fillStyle = '#aaaaaa';
           ctx.fillText('請將燈具置於檢測範圍', w / 2 - 110, lensY - 20 > 40 ? lensY - 20 : 40);
 
           src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
@@ -254,11 +252,11 @@
           return;
         }
 
-        // --- STEP 2: 燈具外觀規格比對 ---
+        // STEP 2: 外觀長寬比過濾
         let aspectRatio = bestContourRect.width / parseFloat(bestContourRect.height);
-        if (aspectRatio < 1.1 || aspectRatio > 2.2) {
+        if (aspectRatio < 1.0 || aspectRatio > 2.2) {
           ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#ff4d4d'; // 黑色背景下使用亮紅色
+          ctx.fillStyle = '#ff4d4d';
           ctx.fillText('非該燈具產品或擺放角度偏差過大', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
 
           src.delete(); gray.delete(); binary.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
@@ -266,7 +264,7 @@
           return;
         }
 
-        // --- STEP 3: 斜槽精準 Match 檢測 ---
+        // STEP 3: 斜槽精準 Match 檢測
         let rotatedROI = new cv.Mat();
         let centerPoint = new cv.Point(centerX, centerY);
         let M = cv.getRotationMatrix2D(centerPoint, angleDeg, 1.0);
@@ -283,7 +281,8 @@
         cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
         cv.Canny(slotGray, edges, 80, 200, 3, false);
 
-        let minLineLength = Math.floor(rectW * 0.65);
+        // 長條狀斜槽線段長度必須達到黃色長條寬度的 70% 以上
+        let minLineLength = Math.floor(rectW * 0.70);
         cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 40, minLineLength, 5);
 
         let horizontalLines = [];
@@ -309,8 +308,8 @@
         }
 
         let validSlotFound = false;
-        let minSlotWidth = 10;
-        let maxSlotWidth = 30;
+        let minSlotWidth = Math.floor(rectH * 0.3);
+        let maxSlotWidth = Math.floor(rectH * 0.95);
         let matchedLines = [];
         let roiCenterX = rectW / 2;
 
@@ -322,7 +321,7 @@
             let distY = Math.abs(l1.avgY - l2.avgY);
             let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
 
-            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.12)) {
+            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.10)) {
               validSlotFound = true;
               matchedLines.push(l1, l2);
               break;
@@ -331,7 +330,7 @@
           if (validSlotFound) break;
         }
 
-        // --- STEP 4: 判定結果畫線與提示 ---
+        // STEP 4: 結果判定與渲染
         if (validSlotFound) {
           matchedLines.forEach(line => {
             let cosA = Math.cos(angleRad);
@@ -348,7 +347,7 @@
             let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
 
             ctx.lineWidth = 3;
-            ctx.strokeStyle = '#00FFFF'; // 青色發光線
+            ctx.strokeStyle = '#00FFFF';
             ctx.beginPath();
             ctx.moveTo(worldX1, worldY1);
             ctx.lineTo(worldX2, worldY2);
@@ -356,11 +355,11 @@
           });
 
           ctx.font = 'bold 36px sans-serif';
-          ctx.fillStyle = '#34c759'; // 亮綠色 PASS
+          ctx.fillStyle = '#34c759';
           ctx.fillText('PASS (斜槽完美對齊)', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
         } else {
           ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#ff4d4d'; // 亮紅色 NG
+          ctx.fillStyle = '#ff4d4d';
           ctx.fillText('NG / 請將斜槽完全對準黃色框', w / 2 - 140, lensY - 20 > 40 ? lensY - 20 : 40);
         }
 
