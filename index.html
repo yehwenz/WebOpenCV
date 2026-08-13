@@ -1,352 +1,352 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>車燈鏡片斜槽特徵 AOI 檢測</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background-color: #121212;
-      color: #ffffff;
-      text-align: center;
-      margin: 0;
-      padding: 10px;
-    }
-    .container {
-      position: relative;
-      display: inline-block;
-      width: 100%;
-      max-width: 640px;
-      margin-top: 10px;
-    }
-    video {
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      opacity: 0.01; pointer-events: none; z-index: -1;
-    }
-    canvas {
-      width: 100%; height: auto;
-      background-color: #000000;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    }
-    #status {
-      margin: 10px 0; padding: 8px; background-color: #222222;
-      border-radius: 8px; font-size: 14px; color: #aaaaaa;
-    }
-    .detection-info { 
-      margin-bottom: 15px; 
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 10px;
-    }
-    .outer-frame {
-      border: 2px solid #007aff;
-      border-radius: 50px;
-      padding: 10px 20px;
-      display: inline-flex;
-      align-items: center;
-      font-weight: bold;
-      color: #007aff;
-    }
-    .inner-frame {
-      border: 2px solid #ffcc00;
-      border-radius: 20px;
-      padding: 4px 12px;
-      display: inline-flex;
-      align-items: center;
-      font-weight: bold;
-      color: #ffcc00;
-      margin-left: 10px;
-    }
-    .btn {
-      background-color: #007aff; color: white; border: none;
-      padding: 10px 20px; font-size: 15px; font-weight: bold;
-      border-radius: 8px; cursor: pointer; margin: 3px;
-    }
-    .btn-mode { background-color: #333333; color: #aaa; border: 1px solid #555; }
-    .btn-mode.active { background-color: #34c759; color: #000; border-color: #34c759; }
-    .btn:disabled { background-color: #444444; color: #888888; }
-  </style>
-  <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>車燈鏡片斜槽特徵 AOI 檢測</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #121212;
+  color: #ffffff;
+  text-align: center;
+  margin: 0;
+  padding: 10px;
+}
+.container {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  max-width: 640px;
+  margin-top: 10px;
+}
+video {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  opacity: 0.01; pointer-events: none; z-index: -1;
+}
+canvas {
+  width: 100%; height: auto;
+  background-color: #000000;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+#status {
+  margin: 10px 0; padding: 8px; background-color: #222222;
+  border-radius: 8px; font-size: 14px; color: #aaaaaa;
+}
+.detection-info { 
+  margin-bottom: 15px; 
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+.outer-frame {
+  border: 2px solid #007aff;
+  border-radius: 50px;
+  padding: 10px 20px;
+  display: inline-flex;
+  align-items: center;
+  font-weight: bold;
+  color: #007aff;
+}
+.inner-frame {
+  border: 2px solid #ffcc00;
+  border-radius: 20px;
+  padding: 4px 12px;
+  display: inline-flex;
+  align-items: center;
+  font-weight: bold;
+  color: #ffcc00;
+  margin-left: 10px;
+}
+.btn {
+  background-color: #007aff; color: white; border: none;
+  padding: 10px 20px; font-size: 15px; font-weight: bold;
+  border-radius: 8px; cursor: pointer; margin: 3px;
+}
+.btn-mode { background-color: #333333; color: #aaa; border: 1px solid #555; }
+.btn-mode.active { background-color: #34c759; color: #000; border-color: #34c759; }
+.btn:disabled { background-color: #444444; color: #888888; }
+</style>
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
 </head>
 <body>
 
-  <div class="detection-info">
-    <div class="outer-frame" id="outerFrame">
-      目前產線：<span id="currentModeText">L</span> 邊
-      <div class="inner-frame" id="innerFrame">
-        (預期斜線 <span id="slopeSign">/</span>)
-      </div>
+<div class="detection-info">
+  <div class="outer-frame" id="outerFrame">
+    目前產線：<span id="currentModeText">L</span> 邊
+    <div class="inner-frame" id="innerFrame">
+      (預期斜線 <span id="slopeSign">/</span>)
     </div>
   </div>
+</div>
 
-  <div style="margin-bottom: 10px;">
-    <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">切換 L 邊 (/)</button>
-    <button id="modeR" class="btn btn-mode" onclick="setMode('R')">切換 R 邊 (\)</button>
-  </div>
+<div style="margin-bottom: 10px;">
+  <button id="modeL" class="btn btn-mode active" onclick="setMode('L')">切換 L 邊 (/)</button>
+  <button id="modeR" class="btn btn-mode" onclick="setMode('R')">切換 R 邊 (\)</button>
+</div>
 
-  <button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
-  <div id="status">等待 OpenCV.js 載入...</div>
+<button id="startBtn" class="btn" disabled onclick="initCamera()">正在載入引擎...</button>
+<div id="status">等待 OpenCV.js 載入...</div>
 
-  <div class="container">
-    <video id="videoInput" playsinline webkit-playsinline autoplay muted></video>
-    <canvas id="canvasOutput"></canvas>
-  </div>
+<div class="container">
+  <video id="videoInput" playsinline webkit-playsinline autoplay muted></video>
+  <canvas id="canvasOutput"></canvas>
+</div>
 
-  <script type="text/javascript">
-    const video = document.getElementById('videoInput');
-    const canvas = document.getElementById('canvasOutput');
-    const ctx = canvas.getContext('2d');
-    const status = document.getElementById('status');
-    const startBtn = document.getElementById('startBtn');
-    
-    let streaming = false;
-    let isOpenCvReady = false;
-    let currentMode = 'L'; 
+<script type="text/javascript">
+const video = document.getElementById('videoInput');
+const canvas = document.getElementById('canvasOutput');
+const ctx = canvas.getContext('2d');
+const status = document.getElementById('status');
+const startBtn = document.getElementById('startBtn');
 
-    function setMode(mode) {
-      currentMode = mode;
-      document.getElementById('currentModeText').innerText = mode;
-      document.getElementById('slopeSign').innerText = (mode === 'L' ? '/' : '\\');
-      document.getElementById('modeL').classList.toggle('active', mode === 'L');
-      document.getElementById('modeR').classList.toggle('active', mode === 'R');
-      status.innerText = `已切換至 [${mode} 邊] 檢測模式`;
-    }
+let streaming = false;
+let isOpenCvReady = false;
+let currentMode = 'L'; 
 
-    function onOpenCvReady() {
-      isOpenCvReady = true;
-      status.innerText = '引擎已就緒，請點擊開啟鏡頭';
-      startBtn.innerText = '開啟鏡頭檢測';
-      startBtn.disabled = false;
-    }
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('currentModeText').innerText = mode;
+  document.getElementById('slopeSign').innerText = (mode === 'L' ? '/' : '\\');
+  document.getElementById('modeL').classList.toggle('active', mode === 'L');
+  document.getElementById('modeR').classList.toggle('active', mode === 'R');
+  status.innerText = `已切換至 [${mode} 邊] 檢測模式`;
+}
 
-    async function initCamera() {
-      if (!isOpenCvReady) return;
-      startBtn.disabled = true;
-      status.innerText = '正在請求相機...';
+function onOpenCvReady() {
+  isOpenCvReady = true;
+  status.innerText = '引擎已就緒，請點擊開啟鏡頭';
+  startBtn.innerText = '開啟鏡頭檢測';
+  startBtn.disabled = false;
+}
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { 
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          },
-          audio: false
-        });
+async function initCamera() {
+  if (!isOpenCvReady) return;
+  startBtn.disabled = true;
+  status.innerText = '正在請求相機...';
 
-        video.srcObject = stream;
-        video.muted = true;
-        video.setAttribute("playsinline", "true");
-        video.setAttribute("webkit-playsinline", "true");
-        video.play().catch(e => console.log("背景播放提示:", e));
+  try {
+    // 解決相機存取與觸發問題
+    video.play().catch(() => {});
 
-        checkVideoReady();
-      } catch (err) {
-        status.innerText = '無法存取相機: ' + err.message;
-        startBtn.disabled = false;
-      }
-    }
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { 
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
 
-    function checkVideoReady() {
-      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        streaming = true;
-        status.innerText = '檢測運行中：請將鏡片與斜槽放入對準框內';
-        startBtn.style.display = 'none';
-        
-        requestAnimationFrame(processFrame);
-      } else {
-        setTimeout(checkVideoReady, 100);
-      }
-    }
+    video.srcObject = stream;
+    video.muted = true;
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("webkit-playsinline", "true");
 
-    function processFrame() {
-      if (!streaming) return;
+    video.onloadeddata = () => {
+      video.play().catch(e => console.log("Play error:", e));
+      checkVideoReady();
+    };
 
-      let w = canvas.width;
-      let h = canvas.height;
+  } catch (err) {
+    status.innerText = '無法存取相機 [' + err.name + ']: ' + err.message;
+    startBtn.disabled = false;
+  }
+}
 
-      // 藍色燈具外框繪製座標
-      let lensW = Math.floor(w * 0.65);
-      let lensH = Math.floor(lensW * 0.70);
-      let lensX = Math.floor((w - lensW) / 2);
-      let lensY = Math.floor((h - lensH) / 2);
+function checkVideoReady() {
+  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    streaming = true;
+    status.innerText = '檢測運行中：請將鏡片與斜槽放入對準框內';
+    startBtn.style.display = 'none';
 
-      let angleDeg = (currentMode === 'L') ? -35 : 35;
-      let angleRad = angleDeg * Math.PI / 180;
+    requestAnimationFrame(processFrame);
+  } else {
+    setTimeout(checkVideoReady, 100);
+  }
+}
 
-      let centerX = lensX + lensW / 2;
-      let centerY = lensY + lensH / 2;
-      
-      let rectW = Math.floor(lensW * 0.58);
-      let rectH = Math.floor(rectW * 0.16);
+function processFrame() {
+  if (!streaming) return;
 
-      try {
-        // 【關鍵修正 1】直接從原始 Video 讀取影像，完全不包含繪製出來的 UI 黃框與藍框
-        let src = cv.imread(video);
-        let gray = new cv.Mat();
-        let edges = new cv.Mat();
-        let contours = new cv.MatVector();
-        let hierarchy = new cv.Mat();
+  let w = canvas.width;
+  let h = canvas.height;
 
-        let lensRoiRect = new cv.Rect(lensX, lensY, lensW, lensH);
-        let lensRoi = src.roi(lensRoiRect);
+  // 計算 ROI 比例座標
+  let lensW = Math.floor(w * 0.65);
+  let lensH = Math.floor(lensW * 0.70);
+  let lensX = Math.floor((w - lensW) / 2);
+  let lensY = Math.floor((h - lensH) / 2);
 
-        cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
-        cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+  let angleDeg = (currentMode === 'L') ? -35 : 35;
+  let angleRad = angleDeg * Math.PI / 180;
 
-        // 【關鍵修正 2】改用精準的 Canny 邊緣檢測來計算真實實體輪廓，不再用 Otsu 放大背景雜訊
-        cv.Canny(gray, edges, 100, 200, 3, false);
-        cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+  let centerX = lensX + lensW / 2;
+  let centerY = lensY + lensH / 2;
+  let rectW = Math.floor(lensW * 0.58);
+  let rectH = Math.floor(rectW * 0.16);
 
-        let totalEdgePixels = cv.countNonZero(edges);
-        
-        // 要求藍框內部必須有足夠的「強邊緣像素」（代表有實體鏡片放置）
-        let minRequiredEdgePixels = (lensW * lensH) * 0.02; // 至少 2% 的邊緣量
+  try {
+    // 1. 繪製當前相機畫面到 Canvas
+    ctx.drawImage(video, 0, 0, w, h);
 
-        // 先把原圖畫上 Canvas 作為背景
-        ctx.drawImage(video, 0, 0, w, h);
+    // 【關鍵修正 1】OpenCV 讀取原始影片畫面，而非繪製了 UI 框線的 Canvas
+    let src = cv.imread(video);
+    let gray = new cv.Mat();
+    let edges = new cv.Mat();
 
-        // 畫上 UI 框
-        ctx.save();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#007aff';
-        ctx.beginPath();
-        ctx.roundRect(lensX, lensY, lensW, lensH, 80);
-        ctx.stroke();
+    let lensRoiRect = new cv.Rect(lensX, lensY, lensW, lensH);
+    let lensRoi = src.roi(lensRoiRect);
 
-        ctx.translate(centerX, centerY);
-        ctx.rotate(angleRad);
-        ctx.strokeStyle = '#ffcc00';
-        ctx.beginPath();
-        ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, rectH / 2);
-        ctx.stroke();
-        ctx.restore();
+    // 2. 轉灰階與模糊處理
+    cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
+    cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
 
-        // 檢查 1：無物件放入
-        if (totalEdgePixels < minRequiredEdgePixels) {
-          ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#aaaaaa';
-          ctx.fillText('請將燈具置於檢測範圍', w / 2 - 110, lensY - 20 > 40 ? lensY - 20 : 40);
+    // 【關鍵修正 2】改用 Canny 計算邊緣線條密度，取代容易誤判的 Otsu 自動二值化
+    cv.Canny(gray, edges, 80, 180, 3, false);
+    let totalEdgePixels = cv.countNonZero(edges);
 
-          src.delete(); gray.delete(); edges.delete(); contours.delete(); hierarchy.delete(); lensRoi.delete();
-          requestAnimationFrame(processFrame);
-          return;
-        }
+    // 先繪製畫面的 UI 輔助框 (藍框與黃框)
+    ctx.save();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#007aff';
+    ctx.beginPath();
+    ctx.roundRect(lensX, lensY, lensW, lensH, 80);
+    ctx.stroke();
 
-        // STEP 3: 斜槽精準 Match 檢測
-        let rotatedROI = new cv.Mat();
-        let centerPoint = new cv.Point(centerX, centerY);
-        let M = cv.getRotationMatrix2D(centerPoint, angleDeg, 1.0);
-        cv.warpAffine(src, rotatedROI, M, src.size());
+    ctx.translate(centerX, centerY);
+    ctx.rotate(angleRad);
+    ctx.strokeStyle = '#ffcc00';
+    ctx.beginPath();
+    ctx.roundRect(-rectW / 2, -rectH / 2, rectW, rectH, rectH / 2);
+    ctx.stroke();
+    ctx.restore();
 
-        let roiRect = new cv.Rect(centerX - rectW / 2, centerY - rectH / 2, rectW, rectH);
-        let slotRoi = rotatedROI.roi(roiRect);
+    // 門檻：藍框區域內必須有至少 1.5% 的強邊緣像素，否則視為未放燈具
+    let minEdgeThreshold = (lensW * lensH) * 0.015;
 
-        let slotGray = new cv.Mat();
-        let slotEdges = new cv.Mat();
-        let lines = new cv.Mat();
+    if (totalEdgePixels < minEdgeThreshold) {
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillStyle = '#aaaaaa';
+      ctx.fillText('請將燈具置於檢測範圍', w / 2 - 110, lensY - 20 > 40 ? lensY - 20 : 40);
 
-        cv.cvtColor(slotRoi, slotGray, cv.COLOR_RGBA2GRAY, 0);
-        cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-        cv.Canny(slotGray, slotEdges, 80, 200, 3, false);
-
-        let minLineLength = Math.floor(rectW * 0.65);
-        cv.HoughLinesP(slotEdges, lines, 1, Math.PI / 180, 35, minLineLength, 5);
-
-        let horizontalLines = [];
-        for (let i = 0; i < lines.rows; ++i) {
-          let x1 = lines.data32S[i * 4];
-          let y1 = lines.data32S[i * 4 + 1];
-          let x2 = lines.data32S[i * 4 + 2];
-          let y2 = lines.data32S[i * 4 + 3];
-
-          let dx = x2 - x1;
-          let dy = y2 - y1;
-
-          if (dx !== 0) {
-            let slope = dy / dx;
-            let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
-
-            // 嚴格轉正角度限在 4 度內
-            if (angle <= 4) {
-              let avgY = (y1 + y2) / 2;
-              let midX = (x1 + x2) / 2;
-              horizontalLines.push({ x1, y1, x2, y2, avgY, midX });
-            }
-          }
-        }
-
-        let validSlotFound = false;
-        let minSlotWidth = Math.floor(rectH * 0.3);
-        let maxSlotWidth = Math.floor(rectH * 0.95);
-        let matchedLines = [];
-        let roiCenterX = rectW / 2;
-
-        for (let i = 0; i < horizontalLines.length; i++) {
-          for (let j = i + 1; j < horizontalLines.length; j++) {
-            let l1 = horizontalLines[i];
-            let l2 = horizontalLines[j];
-
-            let distY = Math.abs(l1.avgY - l2.avgY);
-            let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
-
-            if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.08)) {
-              validSlotFound = true;
-              matchedLines.push(l1, l2);
-              break;
-            }
-          }
-          if (validSlotFound) break;
-        }
-
-        // STEP 4: 結果繪製與提示
-        if (validSlotFound) {
-          matchedLines.forEach(line => {
-            let cosA = Math.cos(angleRad);
-            let sinA = Math.sin(angleRad);
-
-            let lx1 = line.x1 - rectW / 2;
-            let ly1 = line.y1 - rectH / 2;
-            let lx2 = line.x2 - rectW / 2;
-            let ly2 = line.y2 - rectH / 2;
-
-            let worldX1 = centerX + (lx1 * cosA - ly1 * sinA);
-            let worldY1 = centerY + (lx1 * sinA + ly1 * cosA);
-            let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
-            let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
-
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#00FFFF';
-            ctx.beginPath();
-            ctx.moveTo(worldX1, worldY1);
-            ctx.lineTo(worldX2, worldY2);
-            ctx.stroke();
-          });
-
-          ctx.font = 'bold 36px sans-serif';
-          ctx.fillStyle = '#34c759';
-          ctx.fillText('PASS (斜槽完美對齊)', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
-        } else {
-          ctx.font = 'bold 22px sans-serif';
-          ctx.fillStyle = '#ff4d4d';
-          ctx.fillText('NG / 請將斜槽完全對準黃色框', w / 2 - 140, lensY - 20 > 40 ? lensY - 20 : 40);
-        }
-
-        src.delete(); gray.delete(); edges.delete(); contours.delete(); hierarchy.delete(); 
-        lensRoi.delete(); rotatedROI.delete(); slotRoi.delete(); slotGray.delete(); slotEdges.delete(); lines.delete(); M.delete();
-
-      } catch (err) {
-        console.error("OpenCV 分析錯誤:", err);
-      }
-
+      src.delete(); gray.delete(); edges.delete(); lensRoi.delete();
       requestAnimationFrame(processFrame);
+      return;
     }
-  </script>
+
+    // 3. 轉正斜槽區域分析 (HoughLinesP)
+    let rotatedROI = new cv.Mat();
+    let centerPoint = new cv.Point(centerX, centerY);
+    let M = cv.getRotationMatrix2D(centerPoint, angleDeg, 1.0);
+    cv.warpAffine(src, rotatedROI, M, src.size());
+
+    let roiRect = new cv.Rect(centerX - rectW / 2, centerY - rectH / 2, rectW, rectH);
+    let slotRoi = rotatedROI.roi(roiRect);
+
+    let slotGray = new cv.Mat();
+    let slotEdges = new cv.Mat();
+    let lines = new cv.Mat();
+
+    cv.cvtColor(slotRoi, slotGray, cv.COLOR_RGBA2GRAY, 0);
+    cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+    cv.Canny(slotGray, slotEdges, 80, 200, 3, false);
+
+    let minLineLength = Math.floor(rectW * 0.65);
+    cv.HoughLinesP(slotEdges, lines, 1, Math.PI / 180, 35, minLineLength, 5);
+
+    let horizontalLines = [];
+    for (let i = 0; i < lines.rows; ++i) {
+      let x1 = lines.data32S[i * 4];
+      let y1 = lines.data32S[i * 4 + 1];
+      let x2 = lines.data32S[i * 4 + 2];
+      let y2 = lines.data32S[i * 4 + 3];
+
+      let dx = x2 - x1;
+      let dy = y2 - y1;
+
+      if (dx !== 0) {
+        let slope = dy / dx;
+        let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
+
+        if (angle <= 4) {
+          let avgY = (y1 + y2) / 2;
+          let midX = (x1 + x2) / 2;
+          horizontalLines.push({ x1, y1, x2, y2, avgY, midX });
+        }
+      }
+    }
+
+    let validSlotFound = false;
+    let minSlotWidth = Math.floor(rectH * 0.3);
+    let maxSlotWidth = Math.floor(rectH * 0.95);
+    let matchedLines = [];
+    let roiCenterX = rectW / 2;
+
+    for (let i = 0; i < horizontalLines.length; i++) {
+      for (let j = i + 1; j < horizontalLines.length; j++) {
+        let l1 = horizontalLines[i];
+        let l2 = horizontalLines[j];
+
+        let distY = Math.abs(l1.avgY - l2.avgY);
+        let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
+
+        if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.08)) {
+          validSlotFound = true;
+          matchedLines.push(l1, l2);
+          break;
+        }
+      }
+      if (validSlotFound) break;
+    }
+
+    // 4. 結果渲染
+    if (validSlotFound) {
+      matchedLines.forEach(line => {
+        let cosA = Math.cos(angleRad);
+        let sinA = Math.sin(angleRad);
+
+        let lx1 = line.x1 - rectW / 2;
+        let ly1 = line.y1 - rectH / 2;
+        let lx2 = line.x2 - rectW / 2;
+        let ly2 = line.y2 - rectH / 2;
+
+        let worldX1 = centerX + (lx1 * cosA - ly1 * sinA);
+        let worldY1 = centerY + (lx1 * sinA + ly1 * cosA);
+        let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
+        let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
+
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#00FFFF';
+        ctx.beginPath();
+        ctx.moveTo(worldX1, worldY1);
+        ctx.lineTo(worldX2, worldY2);
+        ctx.stroke();
+      });
+
+      ctx.font = 'bold 36px sans-serif';
+      ctx.fillStyle = '#34c759';
+      ctx.fillText('PASS (斜槽完美對齊)', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
+    } else {
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillStyle = '#ff4d4d';
+      ctx.fillText('NG / 請將斜槽完全對準黃色框', w / 2 - 140, lensY - 20 > 40 ? lensY - 20 : 40);
+    }
+
+    src.delete(); gray.delete(); edges.delete(); lensRoi.delete();
+    rotatedROI.delete(); slotRoi.delete(); slotGray.delete(); slotEdges.delete(); lines.delete(); M.delete();
+
+  } catch (err) {
+    console.error("OpenCV 分析錯誤:", err);
+  }
+
+  requestAnimationFrame(processFrame);
+}
+</script>
 </body>
 </html>
