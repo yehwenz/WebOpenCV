@@ -79,8 +79,8 @@ const startBtn = document.getElementById('startBtn');
 let streaming = false;
 let isOpenCvReady = false;
 
-// 固定右邊角度參數
-const ANGLE_DEG = 35;
+// 右邊 R 斜角參數微調
+const ANGLE_DEG = -35; 
 const ANGLE_RAD = ANGLE_DEG * Math.PI / 180;
 
 function onOpenCvReady() {
@@ -132,7 +132,7 @@ function checkVideoReady() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     streaming = true;
-    status.innerText = '檢測運行中：請將 [右邊] 燈具與斜槽對準畫面上之提示框';
+    status.innerText = '檢測運行中：請將 [右邊] 燈具與斜槽對準提示框';
     startBtn.style.display = 'none';
 
     requestAnimationFrame(processFrame);
@@ -141,7 +141,6 @@ function checkVideoReady() {
   }
 }
 
-// 相容性高的繪製圓角矩形
 function drawRoundedRect(ctx, x, y, width, height, radius) {
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
@@ -162,7 +161,7 @@ function processFrame() {
   let w = canvas.width;
   let h = canvas.height;
 
-  // 1. 繪製相機畫面
+  // 1. 繪製攝影機影像
   ctx.drawImage(video, 0, 0, w, h);
 
   let lensW = Math.floor(w * 0.65);
@@ -175,7 +174,7 @@ function processFrame() {
   let rectW = Math.floor(lensW * 0.58);
   let rectH = Math.floor(rectW * 0.16);
 
-  // 2. 繪製藍框與右斜黃框 UI
+  // 2. 繪製藍框與右斜黃框
   ctx.save();
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#007aff';
@@ -200,23 +199,24 @@ function processFrame() {
     cv.cvtColor(lensRoi, gray, cv.COLOR_RGBA2GRAY, 0);
     cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
 
-    // 判斷是否有燈具 (計算邊緣數量)
-    cv.Canny(gray, edges, 80, 180, 3, false);
+    cv.Canny(gray, edges, 60, 150, 3, false);
     let totalEdgePixels = cv.countNonZero(edges);
 
-    let minEdgeThreshold = (lensW * lensH) * 0.012;
+    let minEdgeThreshold = (lensW * lensH) * 0.008;
 
+    // 判斷 1：未放燈具
     if (totalEdgePixels < minEdgeThreshold) {
-      ctx.font = 'bold 24px sans-serif';
+      ctx.font = 'bold 28px sans-serif';
       ctx.fillStyle = '#aaaaaa';
-      ctx.fillText('請放入右邊燈具', w / 2 - 80, lensY - 20 > 40 ? lensY - 20 : 40);
+      ctx.textAlign = 'center';
+      ctx.fillText('請放入右邊燈具', w / 2, 45);
 
       src.delete(); gray.delete(); edges.delete(); lensRoi.delete();
       requestAnimationFrame(processFrame);
       return;
     }
 
-    // 3. 轉正與斜槽 HoughLinesP 檢測
+    // 判斷 2：轉正並檢測斜槽
     let rotatedROI = new cv.Mat();
     let centerPoint = new cv.Point(centerX, centerY);
     let M = cv.getRotationMatrix2D(centerPoint, ANGLE_DEG, 1.0);
@@ -231,10 +231,10 @@ function processFrame() {
 
     cv.cvtColor(slotRoi, slotGray, cv.COLOR_RGBA2GRAY, 0);
     cv.GaussianBlur(slotGray, slotGray, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-    cv.Canny(slotGray, slotEdges, 80, 200, 3, false);
+    cv.Canny(slotGray, slotEdges, 60, 160, 3, false);
 
-    let minLineLength = Math.floor(rectW * 0.55);
-    cv.HoughLinesP(slotEdges, lines, 1, Math.PI / 180, 25, minLineLength, 5);
+    let minLineLength = Math.floor(rectW * 0.45);
+    cv.HoughLinesP(slotEdges, lines, 1, Math.PI / 180, 20, minLineLength, 5);
 
     let horizontalLines = [];
     for (let i = 0; i < lines.rows; ++i) {
@@ -250,7 +250,7 @@ function processFrame() {
         let slope = dy / dx;
         let angle = Math.abs(Math.atan(slope) * (180 / Math.PI));
 
-        if (angle <= 6) {
+        if (angle <= 8) {
           let avgY = (y1 + y2) / 2;
           let midX = (x1 + x2) / 2;
           horizontalLines.push({ x1, y1, x2, y2, avgY, midX });
@@ -272,7 +272,7 @@ function processFrame() {
         let distY = Math.abs(l1.avgY - l2.avgY);
         let centerOffsetX = Math.abs(((l1.midX + l2.midX) / 2) - roiCenterX);
 
-        if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.12)) {
+        if (distY >= minSlotWidth && distY <= maxSlotWidth && centerOffsetX < (rectW * 0.18)) {
           validSlotFound = true;
           matchedLines.push(l1, l2);
           break;
@@ -281,7 +281,9 @@ function processFrame() {
       if (validSlotFound) break;
     }
 
-    // 4. 渲染結果
+    // 3. 文字與綠線繪製
+    ctx.textAlign = 'center';
+
     if (validSlotFound) {
       matchedLines.forEach(line => {
         let cosA = Math.cos(ANGLE_RAD);
@@ -297,21 +299,21 @@ function processFrame() {
         let worldX2 = centerX + (lx2 * cosA - ly2 * sinA);
         let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
 
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#00FFFF';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#00FFFF'; // 青色特徵對齊線
         ctx.beginPath();
         ctx.moveTo(worldX1, worldY1);
         ctx.lineTo(worldX2, worldY2);
         ctx.stroke();
       });
 
-      ctx.font = 'bold 36px sans-serif';
+      ctx.font = 'bold 32px sans-serif';
       ctx.fillStyle = '#34c759';
-      ctx.fillText('PASS (右邊斜槽對齊)', w / 2 - 160, lensY - 20 > 40 ? lensY - 20 : 40);
+      ctx.fillText('PASS (斜槽完美對齊)', w / 2, 45);
     } else {
-      ctx.font = 'bold 22px sans-serif';
+      ctx.font = 'bold 26px sans-serif';
       ctx.fillStyle = '#ff4d4d';
-      ctx.fillText('NG / 請將右斜槽對準黃框', w / 2 - 130, lensY - 20 > 40 ? lensY - 20 : 40);
+      ctx.fillText('NG / 請將右斜槽完全對準黃框', w / 2, 45);
     }
 
     src.delete(); gray.delete(); edges.delete(); lensRoi.delete();
