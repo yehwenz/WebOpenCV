@@ -79,8 +79,8 @@ const startBtn = document.getElementById('startBtn');
 let streaming = false;
 let isOpenCvReady = false;
 
-// 右邊 R 斜角參數微調
-const ANGLE_DEG = -35; 
+// 【核心修正】正 35 度才是 Canvas 畫布上的右斜線 (\)
+const ANGLE_DEG = 35; 
 const ANGLE_RAD = ANGLE_DEG * Math.PI / 180;
 
 function onOpenCvReady() {
@@ -174,7 +174,7 @@ function processFrame() {
   let rectW = Math.floor(lensW * 0.58);
   let rectH = Math.floor(rectW * 0.16);
 
-  // 2. 繪製藍框與右斜黃框
+  // 2. 繪製藍框與正確右斜角度之黃框
   ctx.save();
   ctx.lineWidth = 3;
   ctx.strokeStyle = '#007aff';
@@ -204,7 +204,7 @@ function processFrame() {
 
     let minEdgeThreshold = (lensW * lensH) * 0.008;
 
-    // 判斷 1：未放燈具
+    // 未放燈具判定
     if (totalEdgePixels < minEdgeThreshold) {
       ctx.font = 'bold 28px sans-serif';
       ctx.fillStyle = '#aaaaaa';
@@ -216,7 +216,7 @@ function processFrame() {
       return;
     }
 
-    // 判斷 2：轉正並檢測斜槽
+    // 轉正與斜槽 HoughLinesP 檢測
     let rotatedROI = new cv.Mat();
     let centerPoint = new cv.Point(centerX, centerY);
     let M = cv.getRotationMatrix2D(centerPoint, ANGLE_DEG, 1.0);
@@ -281,7 +281,6 @@ function processFrame() {
       if (validSlotFound) break;
     }
 
-    // 3. 文字與綠線繪製
     ctx.textAlign = 'center';
 
     if (validSlotFound) {
@@ -300,7 +299,7 @@ function processFrame() {
         let worldY2 = centerY + (lx2 * sinA + ly2 * cosA);
 
         ctx.lineWidth = 4;
-        ctx.strokeStyle = '#00FFFF'; // 青色特徵對齊線
+        ctx.strokeStyle = '#00FFFF';
         ctx.beginPath();
         ctx.moveTo(worldX1, worldY1);
         ctx.lineTo(worldX2, worldY2);
@@ -309,7 +308,7 @@ function processFrame() {
 
       ctx.font = 'bold 32px sans-serif';
       ctx.fillStyle = '#34c759';
-      ctx.fillText('PASS (斜槽完美對齊)', w / 2, 45);
+      ctx.fillText('PASS (右斜槽完美對齊)', w / 2, 45);
     } else {
       ctx.font = 'bold 26px sans-serif';
       ctx.fillStyle = '#ff4d4d';
